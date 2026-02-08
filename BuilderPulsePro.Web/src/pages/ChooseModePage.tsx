@@ -35,9 +35,6 @@ function ChooseModePage() {
         {selectedMode && (
           <p className="success">Saved: {selectedMode === 'client' ? 'Client' : 'Contractor'}.</p>
         )}
-        <div className="page-links">
-          <Link to="/">Back to landing</Link>
-        </div>
       </div>
     </div>
   )
