@@ -6,3 +6,8 @@ public interface IEmailSender
 {
     Task SendAsync(EmailMessage message, CancellationToken ct = default);
 }
+
+public interface IEmailStore
+{
+    EmailMessage? LatestMessage { get; }
+}

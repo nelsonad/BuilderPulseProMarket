@@ -3,6 +3,7 @@ using System.Security.Claims;
 using System.Text;
 using BuilderPulsePro.Api.Contracts;
 using BuilderPulsePro.Api.Domain;
+using BuilderPulsePro.Api.Notifications;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.IdentityModel.Tokens;
 
@@ -16,13 +17,16 @@ public static class AuthEndpoints
 
         group.MapPost("/register", Register);
         group.MapPost("/login", Login);
+        group.MapGet("/confirm-email", ConfirmEmail);
 
         return app;
     }
 
     private static async Task<IResult> Register(
         UserManager<AppUser> userManager,
-        RegisterRequest req)
+        RegisterRequest req,
+        IEmailSender emailSender,
+        IConfiguration config)
     {
         var email = (req.Email ?? "").Trim().ToLowerInvariant();
         if (string.IsNullOrWhiteSpace(email)) return Results.BadRequest("Email is required.");
@@ -42,6 +46,21 @@ public static class AuthEndpoints
         if (!result.Succeeded)
             return Results.BadRequest(result.Errors.Select(e => e.Description));
 
+        var token = await userManager.GenerateEmailConfirmationTokenAsync(user);
+        var baseUrl = (config["App:WebBaseUrl"] ?? "http://localhost:5173").Trim().TrimEnd('/');
+        var confirmLink = $"{baseUrl}/confirm-email?userId={user.Id}&token={Uri.EscapeDataString(token)}";
+
+        await emailSender.SendAsync(new EmailMessage(
+            email,
+            "Confirm your email",
+            $"""
+            Thanks for signing up!
+
+            Confirm your email by visiting:
+            {confirmLink}
+            """
+        ));
+
         return Results.Ok();
     }
 
@@ -57,6 +76,9 @@ public static class AuthEndpoints
 
         var user = await userManager.FindByEmailAsync(email);
         if (user is null) return Results.Unauthorized();
+
+        if (!user.EmailConfirmed)
+            return Results.BadRequest("Email not confirmed.");
 
         var ok = await signInManager.CheckPasswordSignInAsync(user, req.Password, lockoutOnFailure: true);
         if (!ok.Succeeded) return Results.Unauthorized();
@@ -87,5 +109,23 @@ public static class AuthEndpoints
         var tokenString = new JwtSecurityTokenHandler().WriteToken(token);
 
         return Results.Ok(new AuthResponse(tokenString, expires));
+    }
+
+    private static async Task<IResult> ConfirmEmail(
+        UserManager<AppUser> userManager,
+        Guid userId,
+        string? token)
+    {
+        if (userId == Guid.Empty || string.IsNullOrWhiteSpace(token))
+            return Results.BadRequest("Invalid confirmation request.");
+
+        var user = await userManager.FindByIdAsync(userId.ToString());
+        if (user is null) return Results.NotFound();
+
+        var result = await userManager.ConfirmEmailAsync(user, token);
+        if (!result.Succeeded)
+            return Results.BadRequest(result.Errors.Select(e => e.Description));
+
+        return Results.Ok();
     }
 }

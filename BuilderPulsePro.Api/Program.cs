@@ -32,6 +32,7 @@ builder.Services
     .AddIdentityCore<AppUser>(options =>
     {
         options.User.RequireUniqueEmail = true;
+        options.SignIn.RequireConfirmedEmail = true;
         options.Password.RequiredLength = 8;
         options.Password.RequireNonAlphanumeric = false;
         options.Password.RequireUppercase = false;
@@ -40,7 +41,8 @@ builder.Services
     })
     .AddRoles<IdentityRole<Guid>>()
     .AddEntityFrameworkStores<AppDbContext>()
-    .AddSignInManager();
+    .AddSignInManager()
+    .AddDefaultTokenProviders();
 
 var jwtIssuer = builder.Configuration["Jwt:Issuer"]!;
 var jwtAudience = builder.Configuration["Jwt:Audience"]!;
@@ -91,7 +93,9 @@ builder.Services.AddScoped<IEventHandler<BidAccepted>, PersistBidAcceptedActivit
 builder.Services.AddScoped<IEventHandler<JobCompleted>, PersistJobCompletedActivity>();
 
 // Email sender (console)
-builder.Services.AddScoped<IEmailSender, ConsoleEmailSender>();
+builder.Services.AddSingleton<ConsoleEmailSender>();
+builder.Services.AddSingleton<IEmailSender>(sp => sp.GetRequiredService<ConsoleEmailSender>());
+builder.Services.AddSingleton<IEmailStore>(sp => sp.GetRequiredService<ConsoleEmailSender>());
 
 builder.Services.AddScoped<JobDigestRunner>();
 
@@ -130,6 +134,19 @@ await using (var scope = app.Services.CreateAsyncScope())
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
+    app.MapGet("/dev/emails/latest", (IEmailStore store) =>
+    {
+        if (store.LatestMessage is null)
+            return Results.NotFound("No emails have been sent yet.");
+
+        var message = store.LatestMessage;
+        return Results.Ok(new
+        {
+            message.To,
+            message.Subject,
+            message.Body
+        });
+    });
 }
 
 app.UseHttpsRedirection();
