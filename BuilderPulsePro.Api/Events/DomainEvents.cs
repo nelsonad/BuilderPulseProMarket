@@ -1,0 +1,39 @@
+﻿namespace BuilderPulsePro.Api.Events;
+
+public interface IDomainEvent
+{
+    DateTimeOffset OccurredAt { get; }
+}
+
+public record JobPosted(
+    Guid JobId,
+    Guid PostedByUserId,
+    DateTimeOffset OccurredAt
+) : IDomainEvent;
+
+public record BidPlaced(
+    Guid BidId,
+    Guid JobId,
+    Guid BidderUserId,
+    DateTimeOffset OccurredAt
+) : IDomainEvent;
+
+public record BidAccepted(
+    Guid JobId,
+    Guid BidId,
+    Guid AcceptedByUserId,
+    DateTimeOffset OccurredAt
+) : IDomainEvent;
+
+public record JobCompleted(
+    Guid JobId,
+    Guid CompletedByUserId,
+    DateTimeOffset OccurredAt
+) : IDomainEvent;
+
+public record MessagePosted(
+    Guid ConversationId,
+    Guid JobId,
+    Guid SenderUserId,
+    DateTimeOffset OccurredAt
+) : IDomainEvent;

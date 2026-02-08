@@ -1,0 +1,80 @@
+﻿import { useEffect, useState } from 'react'
+import './App.css'
+
+type Job = {
+  id: string
+  title: string
+  trade: string
+  status: string
+  createdAt: string
+}
+
+const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '')
+
+function App() {
+  const [jobs, setJobs] = useState<Job[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    const load = async () => {
+      setLoading(true)
+      setError(null)
+
+      try {
+        const response = await fetch(`${apiBaseUrl}/jobs`)
+        if (!response.ok) {
+          throw new Error(`Request failed (${response.status})`)
+        }
+
+        const data = (await response.json()) as Job[]
+        setJobs(data)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unable to load jobs.'
+        setError(message)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    load()
+  }, [])
+
+  return (
+    <div className="page">
+      <header className="header">
+        <div>
+          <h1>BuilderPulsePro</h1>
+          <p className="subtitle">Marketplace preview</p>
+        </div>
+        <div className="meta">
+          <span>API: {apiBaseUrl || 'set VITE_API_BASE_URL'}</span>
+        </div>
+      </header>
+
+      <section className="panel">
+        <h2>Open jobs</h2>
+        {loading && <p>Loading jobs…</p>}
+        {error && <p className="error">{error}</p>}
+        {!loading && !error && jobs.length === 0 && <p>No jobs found.</p>}
+
+        <ul className="job-list">
+          {jobs.map((job) => (
+            <li key={job.id} className="job-card">
+              <div>
+                <strong>{job.title}</strong>
+                <div className="meta">{job.trade}</div>
+              </div>
+              <div className="meta">
+                <span>{job.status}</span>
+                <span>{new Date(job.createdAt).toLocaleDateString()}</span>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </section>
+    </div>
+  )
+}
+
+export default App

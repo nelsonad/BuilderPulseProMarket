@@ -1,0 +1,17 @@
+@BuilderPulsePro.Api_HostAddress = http://localhost:5129
+
+GET {{BuilderPulsePro.Api_HostAddress}}/health/db
+Accept: application/json
+
+###
+
+POST {{BuilderPulsePro.Api_HostAddress}}/jobs
+Content-Type: application/json
+{"title":"Fix leaking sink","trade":"Plumbing","lat":45.67,"lng":-122.52}
+
+
+###
+
+GET {{BuilderPulsePro.Api_HostAddress}}/jobs
+
+###

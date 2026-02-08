@@ -1,0 +1,23 @@
+﻿namespace BuilderPulsePro.Api.Contracts;
+
+public record MetricsResponse(
+    int Users,
+    int Jobs,
+    int Bids,
+    int Messages,
+    int MessageReports
+);
+
+public record MessageReportResponse(
+    Guid ReportId,
+    Guid MessageId,
+    Guid ReporterUserId,
+    string Reason,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset? ResolvedAt,
+    Guid? ResolvedByUserId
+);
+
+public record ResolveMessageReportRequest(
+    bool Resolved
+);

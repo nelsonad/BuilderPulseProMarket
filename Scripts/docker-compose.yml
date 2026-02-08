@@ -1,0 +1,16 @@
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    container_name: builderpulsepro-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: builderpulsepro
+      POSTGRES_USER: bpp
+      POSTGRES_PASSWORD: bpp_password_dontchange_me
+    ports:
+      - "5432:5432"
+    volumes:
+      - bpp_pgdata:/var/lib/postgresql/data
+
+volumes:
+  bpp_pgdata:

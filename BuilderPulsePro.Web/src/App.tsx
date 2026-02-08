@@ -1,0 +1,383 @@
+import React, { type FormEvent, useEffect, useState } from 'react'
+import './App.css'
+
+type Job = {
+  id: string
+  title: string
+  trade: string
+  status: string
+  createdAt: string
+}
+
+type JobDetail = Job & {
+  acceptedBidId?: string | null
+  completedAt?: string | null
+  lat: number
+  lng: number
+}
+
+const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '')
+
+function App() {
+  const [jobs, setJobs] = useState<Job[]>([])
+  const [selectedJob, setSelectedJob] = useState<JobDetail | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [detailError, setDetailError] = useState<string | null>(null)
+  const [showCreate, setShowCreate] = useState(false)
+  const [createError, setCreateError] = useState<string | null>(null)
+  const [createSuccess, setCreateSuccess] = useState<string | null>(null)
+  const [authToken, setAuthToken] = useState(() => localStorage.getItem('bpp.token') ?? '')
+  const [showAuth, setShowAuth] = useState(false)
+  const [authEmail, setAuthEmail] = useState('')
+  const [authPassword, setAuthPassword] = useState('')
+  const [authError, setAuthError] = useState<string | null>(null)
+  const [authSuccess, setAuthSuccess] = useState<string | null>(null)
+  const [title, setTitle] = useState('')
+  const [trade, setTrade] = useState('')
+  const [lat, setLat] = useState('')
+  const [lng, setLng] = useState('')
+
+  useEffect(() => {
+    const load = async () => {
+      setLoading(true)
+      setError(null)
+
+      try {
+        const response = await fetch(`${apiBaseUrl}/jobs`)
+        if (!response.ok) {
+          throw new Error(`Request failed (${response.status})`)
+        }
+
+        const data = (await response.json()) as Job[]
+        setJobs(data)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Unable to load jobs.'
+        setError(message)
+      } finally {
+        setLoading(false)
+      }
+    }
+    load()
+  }, [])
+
+  const registerUser = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setAuthError(null)
+    setAuthSuccess(null)
+
+    try {
+      const response = await fetch(`${apiBaseUrl}/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: authEmail.trim(), password: authPassword }),
+      })
+
+      if (!response.ok) {
+        const text = await response.text()
+        throw new Error(text || `Request failed (${response.status})`)
+      }
+
+      setAuthSuccess('Registered. You can now log in.')
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unable to register.'
+      setAuthError(message)
+    }
+  }
+
+  const loginUser = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setAuthError(null)
+    setAuthSuccess(null)
+
+    try {
+      const response = await fetch(`${apiBaseUrl}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: authEmail.trim(), password: authPassword }),
+      })
+
+      if (!response.ok) {
+        const text = await response.text()
+        throw new Error(text || `Request failed (${response.status})`)
+      }
+
+      const data = (await response.json()) as { accessToken: string }
+      setAuthToken(data.accessToken)
+      localStorage.setItem('bpp.token', data.accessToken)
+      setAuthSuccess('Logged in.')
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unable to log in.'
+      setAuthError(message)
+    }
+  }
+
+  const logoutUser = () => {
+    setAuthToken('')
+    localStorage.removeItem('bpp.token')
+  }
+
+  const submitJob = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setCreateError(null)
+    setCreateSuccess(null)
+
+    if (!title.trim() || !trade.trim()) {
+      setCreateError('Title and trade are required.')
+      return
+    }
+
+    const latValue = Number(lat)
+    const lngValue = Number(lng)
+
+    if (Number.isNaN(latValue) || Number.isNaN(lngValue)) {
+      setCreateError('Lat and Lng must be numbers.')
+      return
+    }
+
+    try {
+      const response = await fetch(`${apiBaseUrl}/jobs`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(authToken.trim() ? { Authorization: `Bearer ${authToken.trim()}` } : {}),
+        },
+        body: JSON.stringify({
+          title: title.trim(),
+          trade: trade.trim(),
+          lat: latValue,
+          lng: lngValue,
+        }),
+      })
+
+      if (!response.ok) {
+        const text = await response.text()
+        throw new Error(text || `Request failed (${response.status})`)
+      }
+
+      setTitle('')
+      setTrade('')
+      setLat('')
+      setLng('')
+      setCreateSuccess('Job created.')
+
+      const created = (await response.json()) as Job
+      setJobs((prev) => [created, ...prev])
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unable to create job.'
+      setCreateError(message)
+    }
+  }
+
+  const loadJobDetail = async (jobId: string) => {
+    setDetailLoading(true)
+    setDetailError(null)
+
+    try {
+      const response = await fetch(`${apiBaseUrl}/jobs/${jobId}`)
+      if (!response.ok) {
+        throw new Error(`Request failed (${response.status})`)
+      }
+
+      const data = (await response.json()) as JobDetail
+      setSelectedJob(data)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unable to load job.'
+      setDetailError(message)
+    } finally {
+      setDetailLoading(false)
+    }
+  }
+
+  return (
+    <div className="page">
+      <header className="header">
+        <div>
+          <h1>BuilderPulsePro</h1>
+          <p className="subtitle">Marketplace preview</p>
+        </div>
+        <div className="meta">
+          <span>API: {apiBaseUrl || 'set VITE_API_BASE_URL'}</span>
+          <button className="link" onClick={() => setShowAuth((value) => !value)}>
+            {showAuth ? 'Hide auth' : authToken ? 'Auth' : 'Log in'}
+          </button>
+          <button className="link" onClick={() => setShowCreate((value) => !value)}>
+            {showCreate ? 'Hide create job' : 'Create job'}
+          </button>
+        </div>
+      </header>
+
+      {showAuth && (
+        <section className="panel">
+          <h2>Authentication</h2>
+          <div className="auth-grid">
+            <form className="form" onSubmit={registerUser}>
+              <h3>Register</h3>
+              <label>
+                Email
+                <input
+                  value={authEmail}
+                  onChange={(event) => setAuthEmail(event.target.value)}
+                  type="email"
+                />
+              </label>
+              <label>
+                Password
+                <input
+                  value={authPassword}
+                  onChange={(event) => setAuthPassword(event.target.value)}
+                  type="password"
+                />
+              </label>
+              <button className="primary" type="submit">
+                Register
+              </button>
+            </form>
+
+            <form className="form" onSubmit={loginUser}>
+              <h3>Login</h3>
+              <label>
+                Email
+                <input
+                  value={authEmail}
+                  onChange={(event) => setAuthEmail(event.target.value)}
+                  type="email"
+                />
+              </label>
+              <label>
+                Password
+                <input
+                  value={authPassword}
+                  onChange={(event) => setAuthPassword(event.target.value)}
+                  type="password"
+                />
+              </label>
+              <button className="primary" type="submit">
+                Log in
+              </button>
+            </form>
+          </div>
+          {authToken && (
+            <div className="token-row">
+              <span className="meta">Token stored for requests.</span>
+              <button className="link" onClick={logoutUser}>
+                Log out
+              </button>
+            </div>
+          )}
+          {authError && <p className="error">{authError}</p>}
+          {authSuccess && <p className="success">{authSuccess}</p>}
+        </section>
+      )}
+
+      {showCreate && (
+        <section className="panel">
+          <h2>Create job</h2>
+          <form className="form" onSubmit={submitJob}>
+            <label>
+              Title
+              <input value={title} onChange={(event) => setTitle(event.target.value)} />
+            </label>
+            <label>
+              Trade
+              <input value={trade} onChange={(event) => setTrade(event.target.value)} />
+            </label>
+            <label>
+              Lat
+              <input value={lat} onChange={(event) => setLat(event.target.value)} />
+            </label>
+            <label>
+              Lng
+              <input value={lng} onChange={(event) => setLng(event.target.value)} />
+            </label>
+            <button className="primary" type="submit">
+              Submit
+            </button>
+            {createError && <p className="error">{createError}</p>}
+            {createSuccess && <p className="success">{createSuccess}</p>}
+          </form>
+        </section>
+      )}
+
+      <section className="panel">
+        <h2>Open jobs</h2>
+        {loading && <p>Loading jobs…</p>}
+        {error && <p className="error">{error}</p>}
+        {!loading && !error && jobs.length === 0 && <p>No jobs found.</p>}
+
+        <ul className="job-list">
+          {jobs.map((job) => (
+            <li key={job.id} className="job-card">
+              <div>
+                <strong>{job.title}</strong>
+                <div className="meta">{job.trade}</div>
+              </div>
+              <div className="meta">
+                <span>{job.status}</span>
+                <span>{new Date(job.createdAt).toLocaleDateString()}</span>
+                <button className="link" onClick={() => loadJobDetail(job.id)}>
+                  View
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <section className="panel">
+        <div className="panel-header">
+          <h2>Job details</h2>
+          {selectedJob && (
+            <button className="link" onClick={() => setSelectedJob(null)}>
+              Clear
+            </button>
+          )}
+        </div>
+        {!selectedJob && !detailLoading && <p>Select a job to see details.</p>}
+        {detailLoading && <p>Loading job details…</p>}
+        {detailError && <p className="error">{detailError}</p>}
+        {selectedJob && !detailLoading && (
+          <div className="detail-grid">
+            <div>
+              <div className="detail-label">Title</div>
+              <div>{selectedJob.title}</div>
+            </div>
+            <div>
+              <div className="detail-label">Trade</div>
+              <div>{selectedJob.trade}</div>
+            </div>
+            <div>
+              <div className="detail-label">Status</div>
+              <div>{selectedJob.status}</div>
+            </div>
+            <div>
+              <div className="detail-label">Created</div>
+              <div>{new Date(selectedJob.createdAt).toLocaleString()}</div>
+            </div>
+            <div>
+              <div className="detail-label">Location</div>
+              <div>
+                {selectedJob.lat.toFixed(4)}, {selectedJob.lng.toFixed(4)}
+              </div>
+            </div>
+            <div>
+              <div className="detail-label">Accepted Bid</div>
+              <div>{selectedJob.acceptedBidId ?? 'None'}</div>
+            </div>
+            <div>
+              <div className="detail-label">Completed</div>
+              <div>
+                {selectedJob.completedAt
+                  ? new Date(selectedJob.completedAt).toLocaleString()
+                  : 'Not completed'}
+              </div>
+            </div>
+          </div>
+        )}
+      </section>
+    </div>
+  )
+}
+
+export default App

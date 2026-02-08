@@ -1,0 +1,494 @@
+﻿using System.Security.Claims;
+using BuilderPulsePro.Api.Auth;
+using BuilderPulsePro.Api.Contracts;
+using BuilderPulsePro.Api.Data;
+using BuilderPulsePro.Api.Domain;
+using BuilderPulsePro.Api.Events;
+using Microsoft.EntityFrameworkCore;
+using NetTopologySuite.Geometries;
+
+namespace BuilderPulsePro.Api.Endpoints;
+
+public static class JobsEndpoints
+{
+    public static IEndpointRouteBuilder MapJobEndpoints(this IEndpointRouteBuilder app)
+    {
+        app.MapGroup("/jobs")
+            .WithTags("Jobs")
+            .MapJobsRoutes();
+
+        app.MapGroup("/my")
+            .WithTags("My")
+            .RequireAuthorization()
+            .MapMyRoutes();
+
+        return app;
+    }
+
+    private static RouteGroupBuilder MapJobsRoutes(this RouteGroupBuilder group)
+    {
+        group.MapPost("", CreateJob).RequireAuthorization();
+        group.MapGet("", ListJobs);
+        group.MapGet("/{id:guid}", GetJob);
+        group.MapGet("/{id:guid}/activity", GetJobActivity).RequireAuthorization();
+        group.MapGet("/{id:guid}/messages", GetJobMessages).RequireAuthorization();
+        group.MapPost("/{id:guid}/messages", SendJobMessage).RequireAuthorization();
+        group.MapPost("/{id:guid}/review", CreateReview).RequireAuthorization();
+        group.MapPost("/{id:guid}/complete", CompleteJob).RequireAuthorization();
+
+        return group;
+    }
+
+    private static RouteGroupBuilder MapMyRoutes(this RouteGroupBuilder group)
+    {
+        group.MapGet("/jobs", ListMyJobs);
+        return group;
+    }
+
+    // ---------------------------
+    // Handlers
+    // ---------------------------
+
+    private static async Task<IResult> CreateJob(AppDbContext db, CreateJobRequest req, ClaimsPrincipal user, IEventBus bus)
+    {
+        if (string.IsNullOrWhiteSpace(req.Title)) return Results.BadRequest("Title is required.");
+        if (string.IsNullOrWhiteSpace(req.Trade)) return Results.BadRequest("Trade is required.");
+
+        var userId = CurrentUser.GetUserId(user);
+
+        var job = new Job
+        {
+            Id = Guid.NewGuid(),
+            Title = req.Title.Trim(),
+            Trade = req.Trade.Trim(),
+            SiteLocation = new Point(req.Lng, req.Lat) { SRID = 4326 },
+            CreatedAt = DateTimeOffset.UtcNow,
+            Status = JobStatus.Open,
+            PostedByUserId = userId
+        };
+
+        db.Jobs.Add(job);
+        await db.SaveChangesAsync();
+
+        await bus.PublishAsync(new JobPosted(job.Id, job.PostedByUserId, DateTimeOffset.UtcNow));
+
+        return Results.Created($"/jobs/{job.Id}", ToJobResponse(job));
+    }
+
+    private static async Task<IResult> ListJobs(
+        AppDbContext db,
+        string? trade,
+        double? lat,
+        double? lng,
+        int? radiusMeters,
+        int take = 50)
+    {
+        var jobs = await LoadMarketplaceJobs(db, trade, lat, lng, radiusMeters, take);
+        return Results.Ok(jobs);
+    }
+
+    private static async Task<IResult> GetJob(AppDbContext db, Guid id)
+    {
+        var job = await db.Jobs.AsNoTracking()
+            .Where(j => j.Id == id)
+            .Select(j => new JobRow
+            {
+                Id = j.Id,
+                Title = j.Title,
+                Trade = j.Trade,
+                Status = j.Status,
+                CreatedAt = j.CreatedAt,
+                AcceptedBidId = j.AcceptedBidId,
+                CompletedAt = j.CompletedAt,
+                SiteLocation = j.SiteLocation
+            })
+            .FirstOrDefaultAsync();
+
+        if (job is null) return Results.NotFound();
+
+        return Results.Ok(ToJobResponse(job));
+    }
+
+    private static async Task<IResult> ListMyJobs(AppDbContext db, ClaimsPrincipal user, int take = 50)
+    {
+        var userId = CurrentUser.GetUserId(user);
+        take = Math.Clamp(take, 1, 200);
+
+        var rows = await db.Jobs.AsNoTracking()
+            .Where(j => j.PostedByUserId == userId)
+            .OrderByDescending(j => j.CreatedAt)
+            .Take(take)
+            .Select(j => new JobRow
+            {
+                Id = j.Id,
+                Title = j.Title,
+                Trade = j.Trade,
+                Status = j.Status,
+                CreatedAt = j.CreatedAt,
+                AcceptedBidId = j.AcceptedBidId,
+                CompletedAt = j.CompletedAt,
+                SiteLocation = j.SiteLocation
+            })
+            .ToListAsync();
+
+        var result = rows.Select(ToJobResponse);
+        return Results.Ok(result);
+    }
+
+    private static async Task<IResult> CompleteJob(AppDbContext db, Guid id, ClaimsPrincipal user, IEventBus bus)
+    {
+        var userId = CurrentUser.GetUserId(user);
+
+        var job = await db.Jobs.FirstOrDefaultAsync(j => j.Id == id);
+        if (job is null) return Results.NotFound("Job not found.");
+
+        if (job.PostedByUserId != userId) return Results.Forbid();
+
+        if (job.Status != JobStatus.Awarded)
+            return Results.BadRequest("Only awarded jobs can be completed.");
+
+        job.Status = JobStatus.Completed;
+        job.CompletedAt = DateTimeOffset.UtcNow;
+
+        await db.SaveChangesAsync();
+
+        await bus.PublishAsync(new JobCompleted(id, userId, DateTimeOffset.UtcNow));
+
+        return Results.Ok();
+    }
+
+    private static async Task<IResult> GetJobActivity(
+        AppDbContext db,
+        Guid id,
+        ClaimsPrincipal user,
+        int take = 100)
+    {
+        var userId = CurrentUser.GetUserId(user);
+        take = Math.Clamp(take, 1, 200);
+
+        var job = await db.Jobs.AsNoTracking()
+            .Where(j => j.Id == id)
+            .Select(j => new { j.PostedByUserId })
+            .FirstOrDefaultAsync();
+
+        if (job is null) return Results.NotFound();
+        if (job.PostedByUserId != userId) return Results.Forbid();
+
+        var rows = await db.ActivityEvents.AsNoTracking()
+            .Where(e => e.JobId == id)
+            .OrderByDescending(e => e.OccurredAt)
+            .Take(take)
+            .Select(e => new ActivityEventResponse(
+                e.Id,
+                e.Type,
+                e.JobId,
+                e.BidId,
+                e.ActorUserId,
+                e.OccurredAt,
+                e.PayloadJson
+            ))
+            .ToListAsync();
+
+        return Results.Ok(rows);
+    }
+
+    private static async Task<IResult> GetJobMessages(
+        AppDbContext db,
+        Guid id,
+        ClaimsPrincipal user,
+        int take = 50)
+    {
+        var userId = CurrentUser.GetUserId(user);
+        take = Math.Clamp(take, 1, 200);
+
+        var job = await db.Jobs.AsNoTracking()
+            .Where(j => j.Id == id)
+            .Select(j => new { j.PostedByUserId, j.AcceptedBidId })
+            .FirstOrDefaultAsync();
+
+        if (job is null) return Results.NotFound();
+
+        if (job.AcceptedBidId is null)
+            return Results.BadRequest("Messaging is available after a bid is accepted.");
+
+        var contractorUserId = await db.Bids.AsNoTracking()
+            .Where(b => b.Id == job.AcceptedBidId.Value)
+            .Select(b => b.BidderUserId)
+            .FirstOrDefaultAsync();
+
+        if (contractorUserId == Guid.Empty) return Results.NotFound();
+
+        if (userId != job.PostedByUserId && userId != contractorUserId)
+            return Results.Forbid();
+
+        var conversation = await db.Conversations.AsNoTracking()
+            .FirstOrDefaultAsync(c => c.JobId == id);
+
+        if (conversation is null)
+            return Results.Ok(new List<JobMessageResponse>());
+
+        var rows = await db.Messages.AsNoTracking()
+            .Where(m => m.ConversationId == conversation.Id)
+            .OrderBy(m => m.CreatedAt)
+            .Take(take)
+            .Select(m => new JobMessageResponse(
+                m.Id,
+                id,
+                m.SenderUserId,
+                m.Body,
+                m.CreatedAt
+            ))
+            .ToListAsync();
+
+        return Results.Ok(rows);
+    }
+
+    private static async Task<IResult> SendJobMessage(
+        AppDbContext db,
+        Guid id,
+        SendJobMessageRequest req,
+        ClaimsPrincipal user,
+        IEventBus bus)
+    {
+        var userId = CurrentUser.GetUserId(user);
+
+        var body = (req.Body ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(body))
+            return Results.BadRequest("Body is required.");
+
+        if (body.Length > 2000)
+            return Results.BadRequest("Body must be 2000 characters or fewer.");
+
+        var job = await db.Jobs.AsNoTracking()
+            .Where(j => j.Id == id)
+            .Select(j => new { j.PostedByUserId, j.AcceptedBidId })
+            .FirstOrDefaultAsync();
+
+        if (job is null) return Results.NotFound();
+
+        if (job.AcceptedBidId is null)
+            return Results.BadRequest("Messaging is available after a bid is accepted.");
+
+        var contractorUserId = await db.Bids.AsNoTracking()
+            .Where(b => b.Id == job.AcceptedBidId.Value)
+            .Select(b => b.BidderUserId)
+            .FirstOrDefaultAsync();
+
+        if (contractorUserId == Guid.Empty) return Results.NotFound();
+
+        if (userId != job.PostedByUserId && userId != contractorUserId)
+            return Results.Forbid();
+
+        var conversation = await db.Conversations
+            .FirstOrDefaultAsync(c => c.JobId == id);
+
+        if (conversation is null)
+        {
+            conversation = new Conversation
+            {
+                Id = Guid.NewGuid(),
+                JobId = id,
+                PosterUserId = job.PostedByUserId,
+                ContractorUserId = contractorUserId,
+                CreatedAt = DateTimeOffset.UtcNow
+            };
+
+            db.Conversations.Add(conversation);
+        }
+        else if (conversation.PosterUserId != job.PostedByUserId || conversation.ContractorUserId != contractorUserId)
+        {
+            conversation.PosterUserId = job.PostedByUserId;
+            conversation.ContractorUserId = contractorUserId;
+        }
+
+        var message = new Message
+        {
+            Id = Guid.NewGuid(),
+            ConversationId = conversation.Id,
+            SenderUserId = userId,
+            Body = body,
+            CreatedAt = DateTimeOffset.UtcNow
+        };
+
+        db.Messages.Add(message);
+        await db.SaveChangesAsync();
+
+        await bus.PublishAsync(new MessagePosted(
+            conversation.Id,
+            id,
+            userId,
+            DateTimeOffset.UtcNow));
+
+        return Results.Ok(new JobMessageResponse(
+            message.Id,
+            id,
+            message.SenderUserId,
+            message.Body,
+            message.CreatedAt
+        ));
+    }
+
+    private static async Task<IResult> CreateReview(
+        AppDbContext db,
+        Guid id,
+        CreateReviewRequest req,
+        ClaimsPrincipal user)
+    {
+        var userId = CurrentUser.GetUserId(user);
+
+        if (req.Rating is < 1 or > 5)
+            return Results.BadRequest("Rating must be between 1 and 5.");
+
+        var body = (req.Body ?? "").Trim();
+        if (body.Length > 2000)
+            return Results.BadRequest("Body must be 2000 characters or fewer.");
+
+        var job = await db.Jobs.AsNoTracking()
+            .Where(j => j.Id == id)
+            .Select(j => new { j.Status, j.PostedByUserId, j.AcceptedBidId })
+            .FirstOrDefaultAsync();
+
+        if (job is null) return Results.NotFound();
+        if (job.Status != JobStatus.Completed)
+            return Results.BadRequest("Reviews are only allowed after job completion.");
+        if (job.AcceptedBidId is null)
+            return Results.BadRequest("Reviews require an accepted bid.");
+
+        var contractorUserId = await db.Bids.AsNoTracking()
+            .Where(b => b.Id == job.AcceptedBidId.Value)
+            .Select(b => b.BidderUserId)
+            .FirstOrDefaultAsync();
+
+        if (contractorUserId == Guid.Empty) return Results.NotFound();
+
+        if (userId != job.PostedByUserId && userId != contractorUserId)
+            return Results.Forbid();
+
+        var revieweeUserId = userId == job.PostedByUserId ? contractorUserId : job.PostedByUserId;
+
+        var alreadyReviewed = await db.Reviews.AsNoTracking()
+            .AnyAsync(r => r.JobId == id && r.ReviewerUserId == userId);
+
+        if (alreadyReviewed)
+            return Results.Conflict("You have already reviewed this job.");
+
+        var review = new Review
+        {
+            Id = Guid.NewGuid(),
+            JobId = id,
+            ReviewerUserId = userId,
+            RevieweeUserId = revieweeUserId,
+            Rating = req.Rating,
+            Body = string.IsNullOrWhiteSpace(body) ? null : body,
+            CreatedAt = DateTimeOffset.UtcNow
+        };
+
+        db.Reviews.Add(review);
+        await db.SaveChangesAsync();
+
+        return Results.Ok(new ReviewResponse(
+            review.Id,
+            review.JobId,
+            review.ReviewerUserId,
+            review.RevieweeUserId,
+            review.Rating,
+            review.Body,
+            review.CreatedAt
+        ));
+    }
+
+    // ---------------------------
+    // Helpers
+    // ---------------------------
+
+    private static async Task<IEnumerable<JobResponse>> LoadMarketplaceJobs(
+        AppDbContext db,
+        string? trade,
+        double? lat,
+        double? lng,
+        int? radiusMeters,
+        int take)
+    {
+        take = Math.Clamp(take, 1, 200);
+
+        var query = BuildMarketplaceJobsQuery(db, trade, lat, lng, radiusMeters);
+
+        var rows = await query
+            .OrderByDescending(r => r.CreatedAt)
+            .Take(take)
+            .ToListAsync();
+
+        // Important: SiteLocation.Y/X must be read in memory (geography -> ST_Y not supported)
+        return rows.Select(ToJobResponse);
+    }
+
+    private static IQueryable<JobRow> BuildMarketplaceJobsQuery(
+        AppDbContext db,
+        string? trade,
+        double? lat,
+        double? lng,
+        int? radiusMeters)
+    {
+        var q = db.Jobs.AsNoTracking()
+            .Where(j => j.Status == JobStatus.Open);
+
+        if (!string.IsNullOrWhiteSpace(trade))
+            q = q.Where(j => j.Trade == trade.Trim());
+
+        if (lat is not null && lng is not null && radiusMeters is not null)
+        {
+            var center = new Point(lng.Value, lat.Value) { SRID = 4326 };
+            q = q.Where(j => j.SiteLocation.Distance(center) <= radiusMeters.Value);
+        }
+
+        return q.Select(j => new JobRow
+        {
+            Id = j.Id,
+            Title = j.Title,
+            Trade = j.Trade,
+            Status = j.Status,
+            CreatedAt = j.CreatedAt,
+            AcceptedBidId = j.AcceptedBidId,
+            CompletedAt = j.CompletedAt,
+            SiteLocation = j.SiteLocation
+        });
+    }
+
+    private static JobResponse ToJobResponse(Job job)
+        => new(
+            job.Id,
+            job.Title,
+            job.Trade,
+            job.Status.ToString(),
+            job.CreatedAt,
+            job.SiteLocation.Y, // lat (in-memory)
+            job.SiteLocation.X, // lng (in-memory)
+            job.AcceptedBidId,
+            job.CompletedAt
+        );
+
+    private static JobResponse ToJobResponse(JobRow row)
+        => new(
+            row.Id,
+            row.Title,
+            row.Trade,
+            row.Status.ToString(),
+            row.CreatedAt,
+            row.SiteLocation.Y, // lat (in-memory)
+            row.SiteLocation.X, // lng (in-memory)
+            row.AcceptedBidId,
+            row.CompletedAt
+        );
+
+    private sealed class JobRow
+    {
+        public Guid Id { get; set; }
+        public string Title { get; set; } = "";
+        public string Trade { get; set; } = "";
+        public JobStatus Status { get; set; }
+        public DateTimeOffset CreatedAt { get; set; }
+        public Guid? AcceptedBidId { get; set; }
+        public DateTimeOffset? CompletedAt { get; set; }
+        public Point SiteLocation { get; set; } = default!;
+    }
+}

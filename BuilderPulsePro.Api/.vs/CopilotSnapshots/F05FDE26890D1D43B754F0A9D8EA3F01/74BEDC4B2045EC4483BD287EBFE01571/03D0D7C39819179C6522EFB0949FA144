@@ -1,0 +1,30 @@
+﻿namespace BuilderPulsePro.Api.Contracts;
+
+public record JobStatusMetric(string Status, int Count);
+
+public record BidStatusMetric(string Status, int Count);
+
+public record DashboardMetricsResponse(
+    int Users,
+    int Contractors,
+    int Jobs,
+    int Bids,
+    int Messages,
+    int MessageReports,
+    IReadOnlyList<JobStatusMetric> JobsByStatus,
+    IReadOnlyList<BidStatusMetric> BidsByStatus
+);
+
+public record MessageReportResponse(
+    Guid ReportId,
+    Guid MessageId,
+    Guid ReporterUserId,
+    string Reason,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset? ResolvedAt,
+    Guid? ResolvedByUserId
+);
+
+public record ResolveMessageReportRequest(
+    bool Resolved
+);
