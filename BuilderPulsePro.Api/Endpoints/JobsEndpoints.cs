@@ -1,11 +1,14 @@
-﻿using System.Security.Claims;
-using BuilderPulsePro.Api.Auth;
+﻿using BuilderPulsePro.Api.Auth;
+using BuilderPulsePro.Api.Attachments;
 using BuilderPulsePro.Api.Contracts;
 using BuilderPulsePro.Api.Data;
 using BuilderPulsePro.Api.Domain;
 using BuilderPulsePro.Api.Events;
+using BuilderPulsePro.Api.Geo;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using NetTopologySuite.Geometries;
+using System.Security.Claims;
 
 namespace BuilderPulsePro.Api.Endpoints;
 
@@ -30,6 +33,13 @@ public static class JobsEndpoints
         group.MapPost("", CreateJob).RequireAuthorization();
         group.MapGet("", ListJobs);
         group.MapGet("/{id:guid}", GetJob);
+        group.MapPut("/{id:guid}", UpdateJob).RequireAuthorization();
+        group.MapPost("/{id:guid}/attachments", AddJobAttachments)
+            .RequireAuthorization()
+            .DisableAntiforgery();
+        group.MapGet("/{id:guid}/attachments", ListJobAttachments);
+        group.MapGet("/{id:guid}/attachments/{attachmentId:guid}", DownloadJobAttachment);
+        group.MapDelete("/{id:guid}/attachments/{attachmentId:guid}", DeleteJobAttachment).RequireAuthorization();
         group.MapGet("/{id:guid}/activity", GetJobActivity).RequireAuthorization();
         group.MapGet("/{id:guid}/messages", GetJobMessages).RequireAuthorization();
         group.MapPost("/{id:guid}/messages", SendJobMessage).RequireAuthorization();
@@ -50,19 +60,41 @@ public static class JobsEndpoints
     // Handlers
     // ---------------------------
 
-    private static async Task<IResult> CreateJob(AppDbContext db, CreateJobRequest req, ClaimsPrincipal user, IEventBus bus)
+    private static async Task<IResult> CreateJob(AppDbContext db, CreateJobRequest req, ClaimsPrincipal user, IEventBus bus, GeoNamesZipLookup lookup)
     {
         if (string.IsNullOrWhiteSpace(req.Title)) return Results.BadRequest("Title is required.");
         if (string.IsNullOrWhiteSpace(req.Trade)) return Results.BadRequest("Trade is required.");
+        if (string.IsNullOrWhiteSpace(req.Zip)) return Results.BadRequest("Zip is required.");
 
         var userId = CurrentUser.GetUserId(user);
+
+        var zip = string.IsNullOrWhiteSpace(req.Zip) ? null : req.Zip.Trim();
+        var city = string.IsNullOrWhiteSpace(req.City) ? null : req.City.Trim();
+        var state = string.IsNullOrWhiteSpace(req.State) ? null : req.State.Trim();
+        var lat = req.Lat;
+        var lng = req.Lng;
+
+        if (!string.IsNullOrWhiteSpace(zip))
+        {
+            var postalLookup = lookup.Lookup(zip);
+
+            if (postalLookup == null)
+                return Results.BadRequest("Zip code not found.");
+
+            lat = postalLookup.Lat;
+            lng = postalLookup.Lng;
+        }
 
         var job = new Job
         {
             Id = Guid.NewGuid(),
             Title = req.Title.Trim(),
             Trade = req.Trade.Trim(),
-            SiteLocation = new Point(req.Lng, req.Lat) { SRID = 4326 },
+            Description = string.IsNullOrWhiteSpace(req.Description) ? null : req.Description.Trim(),
+            City = city,
+            State = state,
+            Zip = zip,
+            SiteLocation = new Point(lng, lat) { SRID = 4326 },
             CreatedAt = DateTimeOffset.UtcNow,
             Status = JobStatus.Open,
             PostedByUserId = userId
@@ -97,6 +129,10 @@ public static class JobsEndpoints
                 Id = j.Id,
                 Title = j.Title,
                 Trade = j.Trade,
+                Description = j.Description,
+                City = j.City,
+                State = j.State,
+                Zip = j.Zip,
                 Status = j.Status,
                 CreatedAt = j.CreatedAt,
                 AcceptedBidId = j.AcceptedBidId,
@@ -108,6 +144,164 @@ public static class JobsEndpoints
         if (job is null) return Results.NotFound();
 
         return Results.Ok(ToJobResponse(job));
+    }
+
+    private static async Task<IResult> UpdateJob(
+        AppDbContext db,
+        UpdateJobRequest req,
+        ClaimsPrincipal user,
+        Guid id,
+        GeoNamesZipLookup lookup)
+    {
+        if (string.IsNullOrWhiteSpace(req.Title)) return Results.BadRequest("Title is required.");
+        if (string.IsNullOrWhiteSpace(req.Trade)) return Results.BadRequest("Trade is required.");
+        if (string.IsNullOrWhiteSpace(req.Zip)) return Results.BadRequest("Zip is required.");
+
+        var userId = CurrentUser.GetUserId(user);
+
+        var job = await db.Jobs.FirstOrDefaultAsync(j => j.Id == id);
+        if (job is null) return Results.NotFound("Job not found.");
+        if (job.PostedByUserId != userId) return Results.Forbid();
+
+        var zip = string.IsNullOrWhiteSpace(req.Zip) ? null : req.Zip.Trim();
+        var city = string.IsNullOrWhiteSpace(req.City) ? null : req.City.Trim();
+        var state = string.IsNullOrWhiteSpace(req.State) ? null : req.State.Trim();
+        var lat = req.Lat;
+        var lng = req.Lng;
+
+        if (!string.IsNullOrWhiteSpace(zip))
+        {
+            var postalLookup = lookup.Lookup(zip);
+
+            if (postalLookup == null)
+                return Results.BadRequest("Zip code not found.");
+
+            lat = postalLookup.Lat;
+            lng = postalLookup.Lng;
+        }
+
+        job.Title = req.Title.Trim();
+        job.Trade = req.Trade.Trim();
+        job.Description = string.IsNullOrWhiteSpace(req.Description) ? null : req.Description.Trim();
+        job.City = city;
+        job.State = state;
+        job.Zip = zip;
+        job.SiteLocation = new Point(lng, lat) { SRID = 4326 };
+
+        await db.SaveChangesAsync();
+
+        return Results.Ok(ToJobResponse(job));
+    }
+
+    private static async Task<IResult> AddJobAttachments(
+        AppDbContext db,
+        ClaimsPrincipal user,
+        Guid id,
+        IFormFileCollection files,
+        AttachmentHelper helper,
+        CancellationToken ct)
+    {
+        var userId = CurrentUser.GetUserId(user);
+
+        var job = await db.Jobs.AsNoTracking()
+            .Where(j => j.Id == id)
+            .Select(j => new { j.PostedByUserId })
+            .FirstOrDefaultAsync(ct);
+
+        if (job is null) return Results.NotFound("Job not found.");
+        if (job.PostedByUserId != userId) return Results.Forbid();
+
+        if (files.Count == 0)
+            return Results.BadRequest("At least one attachment is required.");
+
+        var attachments = new List<JobAttachment>();
+
+        foreach (var file in files)
+        {
+            if (file.Length <= 0)
+                continue;
+
+            var attachment = await helper.SaveAsync(id, file, ct);
+            attachments.Add(attachment);
+        }
+
+        if (attachments.Count == 0)
+            return Results.BadRequest("At least one attachment is required.");
+
+        db.JobAttachments.AddRange(attachments);
+        await db.SaveChangesAsync(ct);
+
+        var response = attachments.Select(a => ToJobAttachmentResponse(id, a)).ToList();
+        return Results.Ok(response);
+    }
+
+    private static async Task<IResult> ListJobAttachments(AppDbContext db, Guid id)
+    {
+        var attachments = await db.JobAttachments.AsNoTracking()
+            .Where(a => a.JobId == id)
+            .OrderByDescending(a => a.CreatedAt)
+            .ToListAsync();
+
+        if (attachments.Count == 0)
+            return Results.Ok(new List<JobAttachmentResponse>());
+
+        var response = attachments.Select(a => ToJobAttachmentResponse(id, a)).ToList();
+        return Results.Ok(response);
+    }
+
+    private static async Task<IResult> DownloadJobAttachment(
+        AppDbContext db,
+        Guid id,
+        Guid attachmentId,
+        bool download = false)
+    {
+        var attachment = await db.JobAttachments.AsNoTracking()
+            .FirstOrDefaultAsync(a => a.Id == attachmentId && a.JobId == id);
+
+        if (attachment is null) return Results.NotFound("Attachment not found.");
+
+        if (attachment.StorageProvider == "Database" && attachment.Content is not null)
+        {
+            return download
+                ? Results.File(attachment.Content, attachment.ContentType, attachment.FileName)
+                : Results.File(attachment.Content, attachment.ContentType);
+        }
+
+        if (!string.IsNullOrWhiteSpace(attachment.StorageUrl))
+            return Results.Redirect(attachment.StorageUrl);
+
+        return Results.NotFound("Attachment content not available.");
+    }
+
+    private static async Task<IResult> DeleteJobAttachment(
+        AppDbContext db,
+        ClaimsPrincipal user,
+        Guid id,
+        Guid attachmentId,
+        AttachmentHelper helper,
+        CancellationToken ct)
+    {
+        var userId = CurrentUser.GetUserId(user);
+
+        var job = await db.Jobs.AsNoTracking()
+            .Where(j => j.Id == id)
+            .Select(j => new { j.PostedByUserId })
+            .FirstOrDefaultAsync();
+
+        if (job is null) return Results.NotFound("Job not found.");
+        if (job.PostedByUserId != userId) return Results.Forbid();
+
+        var attachment = await db.JobAttachments
+            .FirstOrDefaultAsync(a => a.Id == attachmentId && a.JobId == id, ct);
+
+        if (attachment is null) return Results.NotFound("Attachment not found.");
+
+        await helper.DeleteAsync(attachment, ct);
+
+        db.JobAttachments.Remove(attachment);
+        await db.SaveChangesAsync(ct);
+
+        return Results.NoContent();
     }
 
     private static async Task<IResult> ListMyJobs(AppDbContext db, ClaimsPrincipal user, int take = 50)
@@ -124,6 +318,10 @@ public static class JobsEndpoints
                 Id = j.Id,
                 Title = j.Title,
                 Trade = j.Trade,
+                Description = j.Description,
+                City = j.City,
+                State = j.State,
+                Zip = j.Zip,
                 Status = j.Status,
                 CreatedAt = j.CreatedAt,
                 AcceptedBidId = j.AcceptedBidId,
@@ -492,6 +690,23 @@ public static class JobsEndpoints
         return rows.Select(ToJobResponse);
     }
 
+    private static JobAttachmentResponse ToJobAttachmentResponse(Guid jobId, JobAttachment attachment)
+    {
+        var url = string.IsNullOrWhiteSpace(attachment.StorageUrl)
+            ? $"/jobs/{jobId}/attachments/{attachment.Id}"
+            : attachment.StorageUrl;
+
+        return new JobAttachmentResponse(
+            attachment.Id,
+            attachment.JobId,
+            attachment.FileName,
+            attachment.ContentType,
+            attachment.SizeBytes,
+            url,
+            attachment.CreatedAt
+        );
+    }
+
     private static IQueryable<JobRow> BuildMarketplaceJobsQuery(
         AppDbContext db,
         string? trade,
@@ -516,6 +731,10 @@ public static class JobsEndpoints
             Id = j.Id,
             Title = j.Title,
             Trade = j.Trade,
+            Description = j.Description,
+            City = j.City,
+            State = j.State,
+            Zip = j.Zip,
             Status = j.Status,
             CreatedAt = j.CreatedAt,
             AcceptedBidId = j.AcceptedBidId,
@@ -529,8 +748,12 @@ public static class JobsEndpoints
             job.Id,
             job.Title,
             job.Trade,
+            job.Description,
             job.Status.ToString(),
             job.CreatedAt,
+            job.City,
+            job.State,
+            job.Zip,
             job.SiteLocation.Y, // lat (in-memory)
             job.SiteLocation.X, // lng (in-memory)
             job.AcceptedBidId,
@@ -542,8 +765,12 @@ public static class JobsEndpoints
             row.Id,
             row.Title,
             row.Trade,
+            row.Description,
             row.Status.ToString(),
             row.CreatedAt,
+            row.City,
+            row.State,
+            row.Zip,
             row.SiteLocation.Y, // lat (in-memory)
             row.SiteLocation.X, // lng (in-memory)
             row.AcceptedBidId,
@@ -555,6 +782,10 @@ public static class JobsEndpoints
         public Guid Id { get; set; }
         public string Title { get; set; } = "";
         public string Trade { get; set; } = "";
+        public string? Description { get; set; }
+        public string? City { get; set; }
+        public string? State { get; set; }
+        public string? Zip { get; set; }
         public JobStatus Status { get; set; }
         public DateTimeOffset CreatedAt { get; set; }
         public Guid? AcceptedBidId { get; set; }

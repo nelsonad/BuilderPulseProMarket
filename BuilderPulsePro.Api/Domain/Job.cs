@@ -15,6 +15,10 @@ public class Job
     public Guid Id { get; set; }
     public string Title { get; set; } = "";
     public string Trade { get; set; } = "";
+    public string? Description { get; set; }
+    public string? City { get; set; }
+    public string? State { get; set; }
+    public string? Zip { get; set; }
 
     public Point SiteLocation { get; set; } = default!;
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;

@@ -8,28 +8,81 @@
  * @format
  */
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
+/* eslint-disable prettier/prettier */
+
 import React, {useEffect, useMemo, useState} from 'react';
 import {SafeAreaView, ScrollView, View} from 'react-native';
-import {apiBaseUrl, modeStorageKey} from './src/constants';
+import {
+  Appbar,
+  Menu,
+  Provider as PaperProvider,
+  MD3LightTheme,
+} from 'react-native-paper';
 import {jobs} from './src/data/jobs';
 import ChooseModeScreen from './src/screens/ChooseModeScreen';
+import ClientDashboardScreen from './src/screens/ClientDashboardScreen';
 import ConfirmEmailScreen from './src/screens/ConfirmEmailScreen';
+import ContractorDashboardScreen from './src/screens/ContractorDashboardScreen';
+import ContractorProfileScreen, {
+  tradeOptions,
+} from './src/screens/ContractorProfileScreen';
 import JobDetailsScreen from './src/screens/JobDetailsScreen';
-import JobsScreen from './src/screens/JobsScreen';
 import LandingScreen from './src/screens/LandingScreen';
 import LoginScreen from './src/screens/LoginScreen';
 import PostJobScreen from './src/screens/PostJobScreen';
 import SignupScreen from './src/screens/SignupScreen';
+import {confirmEmail, login, register} from './src/services/authService';
+import {
+  getContractorProfile,
+  getRecommendedJobs,
+  upsertContractorProfile,
+} from './src/services/contractorService';
+import {loadLatestEmail} from './src/services/devService';
+import {
+  createJob,
+  getJobAttachments,
+  getMyJobs,
+} from './src/services/jobsService';
+import {getUserMode, setUserMode} from './src/services/storageService';
 import {styles} from './src/styles';
-import {Screen, UserMode} from './src/types';
+import {
+  ContractorProfile,
+  Job,
+  RecommendedJob,
+  Screen,
+  UserMode,
+} from './src/types';
 import {isValidEmail} from './src/utils/validation';
+import {lookupZip} from './src/utils/zipLookup';
 
 const App = () => {
   const [screen, setScreen] = useState<Screen>('landing');
   const [mode, setMode] = useState<UserMode | null>(null);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [authToken, setAuthToken] = useState('');
+  const [myJobs, setMyJobs] = useState<Job[]>([]);
+  const [myJobsLoading, setMyJobsLoading] = useState(false);
+  const [myJobsError, setMyJobsError] = useState('');
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const [pendingScreen, setPendingScreen] = useState<Screen | null>(null);
+  const [contractorProfile, setContractorProfile] =
+    useState<ContractorProfile | null>(null);
+  const [recommendedJobs, setRecommendedJobs] = useState<RecommendedJob[]>([]);
+  const [recommendedLoading, setRecommendedLoading] = useState(false);
+  const [recommendedError, setRecommendedError] = useState('');
+  const [jobAttachments, setJobAttachments] = useState([] as JobAttachment[]);
+
+  const [contractorName, setContractorName] = useState('');
+  const [contractorCity, setContractorCity] = useState('');
+  const [contractorState, setContractorState] = useState('');
+  const [contractorZip, setContractorZip] = useState('');
+  const [contractorTrades, setContractorTrades] = useState<string[]>([]);
+  const [contractorRadius, setContractorRadius] = useState('16093');
+  const [contractorIsAvailable, setContractorIsAvailable] = useState(true);
+  const [contractorUnavailableReason, setContractorUnavailableReason] =
+    useState('');
+  const [contractorMessage, setContractorMessage] = useState('');
+  const [contractorError, setContractorError] = useState('');
 
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
@@ -55,30 +108,261 @@ const App = () => {
 
   const [postTitle, setPostTitle] = useState('');
   const [postTrade, setPostTrade] = useState('');
-  const [postLat, setPostLat] = useState('');
-  const [postLng, setPostLng] = useState('');
+  const [postDescription, setPostDescription] = useState('');
+  const [postCity, setPostCity] = useState('');
+  const [postState, setPostState] = useState('');
+  const [postZip, setPostZip] = useState('');
   const [postMessage, setPostMessage] = useState('');
   const [postError, setPostError] = useState('');
 
   useEffect(() => {
     const loadMode = async () => {
       try {
-        const stored = await AsyncStorage.getItem(modeStorageKey);
-        if (stored === 'client' || stored === 'contractor') {
-          setMode(stored);
-        }
+        const stored = await getUserMode();
+        setMode(stored);
       } catch {
         setMode(null);
       }
     };
-
     loadMode();
   }, []);
 
-  const selectedJob = useMemo(
-    () => jobs.find(job => job.id === selectedJobId) ?? null,
-    [selectedJobId],
-  );
+  const handleSignOut = () => {
+    setAuthToken('');
+    setProfileMenuOpen(false);
+    setPendingScreen(null);
+    setScreen('landing');
+  };
+
+  const handleChangeMode = () => {
+    setProfileMenuOpen(false);
+    setScreen('chooseMode');
+  };
+
+  const handleFindJob = () => {
+    if (mode === 'client') return navigateTo('clientDashboard');
+    if (mode === 'contractor') return navigateTo('contractorDashboard');
+    navigateTo('chooseMode');
+  };
+
+  const navigateTo = (target: Screen) => {
+    if (
+      !authToken &&
+      (target === 'clientDashboard' ||
+        target === 'contractorDashboard' ||
+        target === 'contractorProfile' ||
+        target === 'postJob' ||
+        target === 'jobDetails')
+    ) {
+      setPendingScreen(target);
+      setScreen('login');
+      return;
+    }
+    setScreen(target);
+  };
+
+  const selectedJob = useMemo(() => {
+    if (!selectedJobId) {
+      return null;
+    }
+
+    return (
+      recommendedJobs.find(job => job.id === selectedJobId) ??
+      myJobs.find(job => job.id === selectedJobId) ??
+      jobs.find(job => job.id === selectedJobId) ??
+      null
+    );
+  }, [selectedJobId, myJobs, recommendedJobs]);
+
+  useEffect(() => {
+    if (screen !== 'clientDashboard') {
+      return;
+    }
+
+    if (!authToken) {
+      setMyJobsError('Log in to view your jobs.');
+      setMyJobs([]);
+      return;
+    }
+
+    let isActive = true;
+
+    const loadMyJobs = async () => {
+      setMyJobsLoading(true);
+      setMyJobsError('');
+
+      try {
+        const payload = await getMyJobs(authToken);
+        if (isActive) {
+          setMyJobs(payload);
+        }
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : 'Unable to load jobs.';
+        if (isActive) {
+          setMyJobsError(message);
+          setMyJobs([]);
+        }
+      } finally {
+        if (isActive) {
+          setMyJobsLoading(false);
+        }
+      }
+    };
+
+    loadMyJobs();
+
+    return () => {
+      isActive = false;
+    };
+  }, [screen, authToken]);
+
+  useEffect(() => {
+    if (screen !== 'jobDetails' || !selectedJobId) {
+      setJobAttachments([]);
+      return;
+    }
+
+    let isActive = true;
+
+    const loadAttachments = async () => {
+      try {
+        const attachments = await getJobAttachments(selectedJobId);
+        if (isActive) {
+          setJobAttachments(attachments ?? []);
+        }
+      } catch {
+        if (isActive) {
+          setJobAttachments([]);
+        }
+      }
+    };
+
+    loadAttachments();
+
+    return () => {
+      isActive = false;
+    };
+  }, [screen, selectedJobId]);
+
+  useEffect(() => {
+    if (screen !== 'contractorProfile') {
+      return;
+    }
+
+    if (!authToken) {
+      setContractorError('Log in to edit your profile.');
+      return;
+    }
+
+    let isActive = true;
+
+    const loadProfile = async () => {
+      try {
+        const profile = await getContractorProfile(authToken);
+        if (!profile || !isActive) {
+          return;
+        }
+
+        setContractorProfile(profile);
+        setContractorName(profile.displayName);
+        setContractorCity(profile.city ?? '');
+        setContractorState(profile.state ?? '');
+        setContractorZip(profile.zip ?? '');
+        setContractorTrades(profile.trades);
+        setContractorRadius(profile.serviceRadiusMeters.toString());
+        setContractorIsAvailable(profile.isAvailable);
+        setContractorUnavailableReason(profile.unavailableReason ?? '');
+      } catch (error) {
+        if (!isActive) {
+          return;
+        }
+        const message =
+          error instanceof Error
+            ? error.message
+            : 'Unable to load contractor profile.';
+        setContractorError(message);
+      }
+    };
+
+    loadProfile();
+
+    return () => {
+      isActive = false;
+    };
+  }, [screen, authToken]);
+
+  useEffect(() => {
+    if (screen !== 'contractorDashboard') {
+      return;
+    }
+
+    if (!authToken) {
+      setRecommendedError('Log in to view recommended jobs.');
+      setRecommendedJobs([]);
+      return;
+    }
+
+    let isActive = true;
+
+    const loadContractorData = async () => {
+      setRecommendedLoading(true);
+      setRecommendedError('');
+
+      try {
+        const profile = await getContractorProfile(authToken);
+        if (!profile) {
+          if (isActive) {
+            setContractorProfile(null);
+            setScreen('contractorProfile');
+          }
+          return;
+        }
+
+        if (isActive) {
+          setContractorProfile(profile);
+          setContractorName(profile.displayName);
+          setContractorCity(profile.city ?? '');
+          setContractorState(profile.state ?? '');
+          setContractorZip(profile.zip ?? '');
+          const tradeLookup = new Map(
+            tradeOptions.map(trade => [trade.toLowerCase(), trade]),
+          );
+          const normalizedTrades = profile.trades
+            .map(trade => tradeLookup.get(trade.trim().toLowerCase()))
+            .filter((trade): trade is string => Boolean(trade));
+          setContractorTrades(normalizedTrades);
+          setContractorRadius(profile.serviceRadiusMeters.toString());
+          setContractorIsAvailable(profile.isAvailable);
+          setContractorUnavailableReason(profile.unavailableReason ?? '');
+        }
+
+        const recommended = await getRecommendedJobs(authToken);
+        if (isActive) {
+          setRecommendedJobs(recommended.items);
+        }
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : 'Unable to load recommended jobs.';
+        if (isActive) {
+          setRecommendedError(message);
+          setRecommendedJobs([]);
+        }
+      } finally {
+        if (isActive) {
+          setRecommendedLoading(false);
+        }
+      }
+    };
+
+    loadContractorData();
+
+    return () => {
+      isActive = false;
+    };
+  }, [screen, authToken]);
 
   const handleLogin = async () => {
     setLoginError('');
@@ -107,20 +391,18 @@ const App = () => {
     }
 
     try {
-      const response = await fetch(`${apiBaseUrl}/auth/login`, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({email: trimmed, password: loginPassword}),
-      });
-
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(text || `Request failed (${response.status})`);
-      }
-
-      const payload = (await response.json()) as {accessToken: string};
+      const payload = await login(trimmed, loginPassword);
       setAuthToken(payload.accessToken);
-      setScreen('chooseMode');
+      if (pendingScreen) {
+        setScreen(pendingScreen);
+        setPendingScreen(null);
+      } else if (mode === 'client') {
+        setScreen('clientDashboard');
+      } else if (mode === 'contractor') {
+        setScreen('contractorDashboard');
+      } else {
+        setScreen('chooseMode');
+      }
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Unable to log in.';
@@ -166,16 +448,7 @@ const App = () => {
     }
 
     try {
-      const response = await fetch(`${apiBaseUrl}/auth/register`, {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({email: trimmed, password: signupPassword}),
-      });
-
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(text || `Request failed (${response.status})`);
-      }
+      await register(trimmed, signupPassword);
 
       setSignupMessage(
         'Account created. Check your email to confirm your account.',
@@ -202,16 +475,7 @@ const App = () => {
     }
 
     try {
-      const response = await fetch(
-        `${apiBaseUrl}/auth/confirm-email?userId=${encodeURIComponent(
-          confirmUserId,
-        )}&token=${encodeURIComponent(confirmToken)}`,
-      );
-
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(text || `Request failed (${response.status})`);
-      }
+      await confirmEmail(confirmUserId, confirmToken);
 
       setConfirmMessage('Email confirmed. You can log in now.');
     } catch (error) {
@@ -226,13 +490,7 @@ const App = () => {
     setConfirmError('');
 
     try {
-      const response = await fetch(`${apiBaseUrl}/dev/emails/latest`);
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(text || `Request failed (${response.status})`);
-      }
-
-      const data = (await response.json()) as {body?: string};
+      const data = await loadLatestEmail();
       const body = data.body ?? '';
       const match = body.match(
         /confirm-email\?userId=([^&\s]+)&token=([^\s]+)/,
@@ -252,9 +510,74 @@ const App = () => {
   };
 
   const handleChooseMode = async (nextMode: UserMode) => {
-    await AsyncStorage.setItem(modeStorageKey, nextMode);
+    await setUserMode(nextMode);
     setMode(nextMode);
-    setScreen('landing');
+    navigateTo(
+      nextMode === 'client' ? 'clientDashboard' : 'contractorDashboard',
+    );
+  };
+
+  const handleSaveContractorProfile = async () => {
+    setContractorError('');
+    setContractorMessage('');
+
+    if (!authToken) {
+      setContractorError('Log in to save your profile.');
+      return;
+    }
+
+    if (!contractorName.trim()) {
+      setContractorError('Display name is required.');
+      return;
+    }
+
+    const tradeLookup = new Map(
+      tradeOptions.map(trade => [trade.toLowerCase(), trade]),
+    );
+    const normalizedTrades = contractorTrades
+      .map(trade => tradeLookup.get(trade.trim().toLowerCase()))
+      .filter((trade): trade is string => Boolean(trade));
+
+    if (normalizedTrades.length === 0) {
+      setContractorError('Add at least one trade.');
+      return;
+    }
+
+    const radiusValue = Number(contractorRadius);
+    if (!contractorZip.trim()) {
+      setContractorError('Zip code is required.');
+      return;
+    }
+
+    if (Number.isNaN(radiusValue) || radiusValue <= 0) {
+      setContractorError('Service radius must be greater than zero.');
+      return;
+    }
+
+    try {
+      const profile = await upsertContractorProfile(authToken, {
+        displayName: contractorName.trim(),
+        trades: normalizedTrades,
+        city: contractorCity.trim() || null,
+        state: contractorState.trim() || null,
+        zip: contractorZip.trim() || null,
+        lat: 0,
+        lng: 0,
+        serviceRadiusMeters: radiusValue,
+        isAvailable: contractorIsAvailable,
+        unavailableReason: contractorIsAvailable
+          ? null
+          : contractorUnavailableReason.trim() || null,
+      });
+
+      setContractorProfile(profile);
+      setContractorMessage('Profile saved.');
+      setScreen('contractorDashboard');
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Unable to save profile.';
+      setContractorError(message);
+    }
   };
 
   const handlePostJob = async () => {
@@ -266,10 +589,15 @@ const App = () => {
       return;
     }
 
-    const latValue = Number(postLat);
-    const lngValue = Number(postLng);
-    if (Number.isNaN(latValue) || Number.isNaN(lngValue)) {
-      setPostError('Lat and Lng must be numbers.');
+    const resolvedZip = postZip.trim();
+    if (!resolvedZip) {
+      setPostError('Zip code is required.');
+      return;
+    }
+
+    const zipMatch = lookupZip(resolvedZip);
+    if (!zipMatch) {
+      setPostError('Zip code not found in lookup table.');
       return;
     }
 
@@ -279,47 +607,40 @@ const App = () => {
     }
 
     try {
-      const response = await fetch(`${apiBaseUrl}/jobs`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${authToken}`,
-        },
-        body: JSON.stringify({
-          title: postTitle.trim(),
-          trade: postTrade.trim(),
-          lat: latValue,
-          lng: lngValue,
-        }),
+      await createJob(authToken, {
+        title: postTitle.trim(),
+        trade: postTrade.trim(),
+        description: postDescription.trim() || null,
+        city: postCity.trim() || null,
+        state: postState.trim() || null,
+        zip: resolvedZip || null,
+        lat: 0,
+        lng: 0,
       });
-
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(text || `Request failed (${response.status})`);
-      }
 
       setPostMessage('Job submitted.');
       setPostTitle('');
       setPostTrade('');
-      setPostLat('');
-      setPostLng('');
+      setPostDescription('');
+      setPostCity('');
+      setPostState('');
+      setPostZip('');
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Unable to post job.';
       setPostError(message);
     }
   };
-
-  const screenContent = (() => {
+  const renderScreenContent = () => {
     switch (screen) {
       case 'landing':
         return (
           <LandingScreen
             mode={mode}
-            onFindJob={() => setScreen('jobs')}
-            onPostJob={() => setScreen('postJob')}
-            onLogin={() => setScreen('login')}
-            onSignup={() => setScreen('signup')}
+            onFindJob={handleFindJob}
+            onPostJob={() => navigateTo('postJob')}
+            onLogin={() => navigateTo('login')}
+            onSignup={() => navigateTo('signup')}
           />
         );
       case 'login':
@@ -333,8 +654,8 @@ const App = () => {
             onEmailChange={setLoginEmail}
             onPasswordChange={setLoginPassword}
             onSubmit={handleLogin}
-            onSignup={() => setScreen('signup')}
-            onBack={() => setScreen('landing')}
+            onSignup={() => navigateTo('signup')}
+            onBack={() => navigateTo('landing')}
           />
         );
       case 'signup':
@@ -352,8 +673,8 @@ const App = () => {
             onPasswordChange={setSignupPassword}
             onConfirmChange={setSignupConfirm}
             onSubmit={handleSignup}
-            onLogin={() => setScreen('login')}
-            onBack={() => setScreen('landing')}
+            onLogin={() => navigateTo('login')}
+            onBack={() => navigateTo('landing')}
           />
         );
       case 'confirmEmail':
@@ -367,35 +688,79 @@ const App = () => {
             onTokenChange={setConfirmToken}
             onConfirm={handleConfirmEmail}
             onLoadLatest={handleLoadLatestEmail}
-            onLogin={() => setScreen('login')}
-            onBack={() => setScreen('landing')}
+            onLogin={() => navigateTo('login')}
+            onBack={() => navigateTo('landing')}
           />
         );
       case 'chooseMode':
         return (
           <ChooseModeScreen
             onChooseMode={handleChooseMode}
-            onBack={() => setScreen('landing')}
+            onBack={() => navigateTo('landing')}
           />
         );
-      case 'jobs':
+      case 'clientDashboard':
         return (
-          <JobsScreen
-            jobs={jobs}
-            onSelectJob={jobId => {
+          <ClientDashboardScreen
+            jobs={myJobs}
+            isLoading={myJobsLoading}
+            errorMessage={myJobsError}
+            onCreateJob={() => navigateTo('postJob')}
+            onViewJob={jobId => {
               setSelectedJobId(jobId);
-              setScreen('jobDetails');
+              navigateTo('jobDetails');
             }}
-            onPostJob={() => setScreen('postJob')}
-            onBack={() => setScreen('landing')}
+          />
+        );
+      case 'contractorDashboard':
+        return (
+          <ContractorDashboardScreen
+            profile={contractorProfile}
+            jobs={recommendedJobs}
+            isLoading={recommendedLoading}
+            errorMessage={recommendedError}
+            onCreateProfile={() => navigateTo('contractorProfile')}
+            onEditProfile={() => navigateTo('contractorProfile')}
+            onViewJob={jobId => {
+              setSelectedJobId(jobId);
+              navigateTo('jobDetails');
+            }}
+          />
+        );
+      case 'contractorProfile':
+        return (
+          <ContractorProfileScreen
+            displayName={contractorName}
+            city={contractorCity}
+            state={contractorState}
+            zip={contractorZip}
+            trades={contractorTrades}
+            radius={contractorRadius}
+            isAvailable={contractorIsAvailable}
+            unavailableReason={contractorUnavailableReason}
+            error={contractorError}
+            message={contractorMessage}
+            onDisplayNameChange={setContractorName}
+            onCityChange={setContractorCity}
+            onStateChange={setContractorState}
+            onZipChange={(value) =>
+              setContractorZip(value.replace(/\D/g, '').slice(0, 5))
+            }
+            onTradesChange={setContractorTrades}
+            onRadiusChange={setContractorRadius}
+            onAvailabilityChange={setContractorIsAvailable}
+            onUnavailableReasonChange={setContractorUnavailableReason}
+            onSubmit={handleSaveContractorProfile}
+            onBack={() => navigateTo('contractorDashboard')}
           />
         );
       case 'jobDetails':
         return (
           <JobDetailsScreen
             job={selectedJob}
-            onBack={() => setScreen('jobs')}
-            onPostJob={() => setScreen('postJob')}
+            attachments={jobAttachments}
+            onBack={() => navigateTo('clientDashboard')}
+            onPostJob={() => navigateTo('postJob')}
           />
         );
       case 'postJob':
@@ -404,29 +769,63 @@ const App = () => {
           <PostJobScreen
             title={postTitle}
             trade={postTrade}
-            lat={postLat}
-            lng={postLng}
+            description={postDescription}
+            city={postCity}
+            state={postState}
+            zip={postZip}
             message={postMessage}
             error={postError}
             onTitleChange={setPostTitle}
             onTradeChange={setPostTrade}
-            onLatChange={setPostLat}
-            onLngChange={setPostLng}
+            onDescriptionChange={setPostDescription}
+            onCityChange={setPostCity}
+            onStateChange={setPostState}
+            onZipChange={setPostZip}
             onSubmit={handlePostJob}
-            onBackToJobs={() => setScreen('jobs')}
-            onBack={() => setScreen('landing')}
+            onBackToDashboard={() => navigateTo('clientDashboard')}
           />
         );
     }
-  })();
+  };
+  const screenContent = renderScreenContent();
 
   return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView contentInsetAdjustmentBehavior="automatic">
-        <View style={styles.shell}>{screenContent}</View>
-      </ScrollView>
-    </SafeAreaView>
+    <PaperProvider theme={MD3LightTheme}>
+      <SafeAreaView style={styles.container}>
+        <Appbar.Header>
+          <Appbar.Content title="BuilderPulsePro" />
+          <Menu
+            visible={profileMenuOpen}
+            onDismiss={() => setProfileMenuOpen(false)}
+            anchor={
+              <Appbar.Action
+                icon="account-circle"
+                onPress={() => setProfileMenuOpen(true)}
+              />
+            }
+          >
+            <Menu.Item onPress={handleChangeMode} title="Change Mode" />
+            {authToken ? (
+              <Menu.Item onPress={handleSignOut} title="Sign Out" />
+            ) : (
+              <Menu.Item
+                onPress={() => {
+                  setProfileMenuOpen(false);
+                  setScreen('login');
+                }}
+                title="Log In"
+              />
+            )}
+          </Menu>
+        </Appbar.Header>
+        <ScrollView contentInsetAdjustmentBehavior="automatic">
+          <View style={styles.shell}>{screenContent}</View>
+        </ScrollView>
+      </SafeAreaView>
+    </PaperProvider>
   );
 };
 
 export default App;
+
+/* eslint-enable prettier/prettier */

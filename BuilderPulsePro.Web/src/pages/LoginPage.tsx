@@ -1,8 +1,23 @@
-import { type FormEvent, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
-import '../App.css'
-
-const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '')
+import { type ChangeEvent, type FormEvent, useState } from 'react'
+import { Link as RouterLink, useNavigate } from 'react-router-dom'
+import {
+  Box,
+  Button,
+  Card,
+  CardContent,
+  Container,
+  Link,
+  Stack,
+  TextField,
+  Typography,
+} from '@mui/material'
+import { login } from '../services/authService'
+import {
+  clearAuthRedirect,
+  getAuthRedirect,
+  getUserMode,
+  setAuthToken,
+} from '../services/storageService'
 
 function LoginPage() {
   const navigate = useNavigate()
@@ -48,19 +63,23 @@ function LoginPage() {
     }
 
     try {
-      const response = await fetch(`${apiBaseUrl}/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim(), password }),
-      })
+      const payload = await login(email.trim(), password)
+      setAuthToken(payload.accessToken)
 
-      if (!response.ok) {
-        const text = await response.text()
-        throw new Error(text || `Request failed (${response.status})`)
-      }
+      const redirectTarget = getAuthRedirect()
+      const storedMode = getUserMode()
 
       setSubmitSuccess('Logged in successfully.')
-      navigate('/choose-mode')
+      if (redirectTarget) {
+        clearAuthRedirect()
+        navigate(redirectTarget)
+      } else if (storedMode === 'client') {
+        navigate('/client-dashboard')
+      } else if (storedMode === 'contractor') {
+        navigate('/contractor-dashboard')
+      } else {
+        navigate('/choose-mode')
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unable to log in.'
       setSubmitError(message)
@@ -68,43 +87,67 @@ function LoginPage() {
   }
 
   return (
-    <div className="page-shell">
-      <div className="page-card">
-        <p className="page-kicker">Welcome back</p>
-        <h1 className="page-title">Log in to BuilderPulse Pro</h1>
-        <p className="page-body">Use your account to track jobs and coordinate with contractors.</p>
-        <form className="form" onSubmit={handleSubmit} noValidate>
-          <label>
-            Email address
-            <input
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              type="email"
-              autoComplete="email"
-            />
-          </label>
-          {emailError && <span className="error">{emailError}</span>}
-          <label>
-            Password
-            <input
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              type="password"
-              autoComplete="current-password"
-            />
-          </label>
-          {passwordError && <span className="error">{passwordError}</span>}
-          <button className="button primary" type="submit">
-            Log in
-          </button>
-          {submitError && <span className="error">{submitError}</span>}
-          {submitSuccess && <span className="success">{submitSuccess}</span>}
-        </form>
-        <div className="page-links">
-          <Link to="/signup">Need an account? Sign up</Link>
-        </div>
-      </div>
-    </div>
+    <Container maxWidth="sm" sx={{ py: 6 }}>
+      <Card elevation={3}>
+        <CardContent>
+          <Stack spacing={3}>
+            <Box>
+              <Typography variant="overline" color="primary">
+                Welcome back
+              </Typography>
+              <Typography variant="h4" fontWeight={700} gutterBottom>
+                Log in to BuilderPulsePro
+              </Typography>
+              <Typography color="text.secondary">
+                Use your account to track jobs and coordinate with contractors.
+              </Typography>
+            </Box>
+            <Box component="form" onSubmit={handleSubmit} noValidate>
+              <Stack spacing={2}>
+                <TextField
+                  label="Email address"
+                  value={email}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => setEmail(event.target.value)}
+                  type="email"
+                  autoComplete="email"
+                  error={Boolean(emailError)}
+                  helperText={emailError}
+                  fullWidth
+                />
+                <TextField
+                  label="Password"
+                  value={password}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => setPassword(event.target.value)}
+                  type="password"
+                  autoComplete="current-password"
+                  error={Boolean(passwordError)}
+                  helperText={passwordError}
+                  fullWidth
+                />
+                <Button variant="contained" size="large" type="submit">
+                  Log in
+                </Button>
+                {submitError && (
+                  <Typography color="error" variant="body2">
+                    {submitError}
+                  </Typography>
+                )}
+                {submitSuccess && (
+                  <Typography color="success.main" variant="body2">
+                    {submitSuccess}
+                  </Typography>
+                )}
+              </Stack>
+            </Box>
+            <Typography variant="body2">
+              <Link component={RouterLink} to="/signup">
+                Need an account? Sign up
+              </Link>
+            </Typography>
+          </Stack>
+        </CardContent>
+      </Card>
+    </Container>
   )
 }
 

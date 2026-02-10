@@ -1,9 +1,11 @@
 using BuilderPulsePro.Api.Auth;
+using BuilderPulsePro.Api.Attachments;
 using BuilderPulsePro.Api.Contracts;
 using BuilderPulsePro.Api.Data;
 using BuilderPulsePro.Api.Domain;
 using BuilderPulsePro.Api.Endpoints;
 using BuilderPulsePro.Api.Events;
+using BuilderPulsePro.Api.Geo;
 using BuilderPulsePro.Api.Notifications;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
@@ -11,14 +13,27 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using NetTopologySuite.Geometries;
 using System.IdentityModel.Tokens.Jwt;
+using System.Reflection;
 using System.Security.Claims;
 using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
 
+
 // Add services to the container.
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
+
+builder.Services.AddSingleton(sp =>
+{
+    var asm = Assembly.GetExecutingAssembly();
+    const string resourceName = "BuilderPulsePro.Api.Resources.GeoNames.US.txt";
+
+    var stream = asm.GetManifestResourceStream(resourceName)
+        ?? throw new InvalidOperationException($"Embedded resource not found: {resourceName}");
+
+    return GeoNamesZipLookup.LoadFromStream(stream);
+});
 
 builder.Services.AddDbContext<AppDbContext>(opt =>
 {
@@ -79,6 +94,12 @@ builder.Services.AddCors(options =>
 
 builder.Services.Configure<JobDigestOptions>(
     builder.Configuration.GetSection("Notifications:JobDigest"));
+
+builder.Services.Configure<AttachmentStorageOptions>(
+    builder.Configuration.GetSection("Attachments"));
+
+builder.Services.AddSingleton<IAttachmentStorage, AttachmentStorage>();
+builder.Services.AddSingleton<AttachmentHelper>();
 
 builder.Services.AddSingleton<IEventBus, InProcessEventBus>();
 

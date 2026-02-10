@@ -1,10 +1,11 @@
-﻿using System.Security.Claims;
-using BuilderPulsePro.Api.Auth;
+﻿using BuilderPulsePro.Api.Auth;
 using BuilderPulsePro.Api.Contracts;
 using BuilderPulsePro.Api.Data;
 using BuilderPulsePro.Api.Domain;
+using BuilderPulsePro.Api.Geo;
 using Microsoft.EntityFrameworkCore;
 using NetTopologySuite.Geometries;
+using System.Security.Claims;
 
 namespace BuilderPulsePro.Api.Endpoints;
 
@@ -168,6 +169,9 @@ public static class ContractorEndpoints
         return Results.Ok(new ContractorProfileResponse(
             p.DisplayName,
             SplitTrades(p.TradesCsv),
+            p.City,
+            p.State,
+            p.Zip,
             p.HomeBase.Y, // lat (in-memory)
             p.HomeBase.X, // lng (in-memory)
             p.ServiceRadiusMeters,
@@ -177,12 +181,15 @@ public static class ContractorEndpoints
         ));
     }
 
-    private static async Task<IResult> UpsertProfile(AppDbContext db, ClaimsPrincipal user, UpsertContractorProfileRequest req)
+    private static async Task<IResult> UpsertProfile(AppDbContext db, ClaimsPrincipal user, UpsertContractorProfileRequest req, GeoNamesZipLookup lookup)
     {
         var userId = CurrentUser.GetUserId(user);
 
         if (string.IsNullOrWhiteSpace(req.DisplayName))
             return Results.BadRequest("DisplayName is required.");
+
+        if (string.IsNullOrWhiteSpace(req.Zip))
+            return Results.BadRequest("Zip is required.");
 
         if (req.ServiceRadiusMeters <= 0)
             return Results.BadRequest("ServiceRadiusMeters must be > 0.");
@@ -191,7 +198,34 @@ public static class ContractorEndpoints
         if (string.IsNullOrWhiteSpace(tradesCsv))
             return Results.BadRequest("At least one trade is required.");
 
+        var zip = string.IsNullOrWhiteSpace(req.Zip) ? null : req.Zip.Trim();
+        var city = string.IsNullOrWhiteSpace(req.City) ? null : req.City.Trim();
+        var state = string.IsNullOrWhiteSpace(req.State) ? null : req.State.Trim();
+        var lat = req.Lat;
+        var lng = req.Lng;
+
+
+
+        if (!string.IsNullOrWhiteSpace(zip))
+        {
+            var lookupResult = lookup.Lookup(zip);
+
+            if (lookupResult == null)
+                return Results.BadRequest("Zip code not found.");
+
+            lat = lookupResult.Lat;
+            lng = lookupResult.Lng;
+        }
+
         var existing = await db.ContractorProfiles.FirstOrDefaultAsync(x => x.UserId == userId);
+
+        var requestedAvailability = req.IsAvailable;
+        var normalizedReason = string.IsNullOrWhiteSpace(req.UnavailableReason)
+            ? null
+            : req.UnavailableReason.Trim();
+
+        var resolvedAvailability = requestedAvailability ?? existing?.IsAvailable ?? true;
+        var resolvedReason = resolvedAvailability ? null : normalizedReason;
 
         if (existing is null)
         {
@@ -199,9 +233,14 @@ public static class ContractorEndpoints
             {
                 UserId = userId,
                 DisplayName = req.DisplayName.Trim(),
+                City = city,
+                State = state,
+                Zip = zip,
                 TradesCsv = tradesCsv,
-                HomeBase = new Point(req.Lng, req.Lat) { SRID = 4326 },
+                HomeBase = new Point(lng, lat) { SRID = 4326 },
                 ServiceRadiusMeters = req.ServiceRadiusMeters,
+                IsAvailable = resolvedAvailability,
+                UnavailableReason = resolvedReason,
                 UpdatedAt = DateTimeOffset.UtcNow
             };
 
@@ -210,9 +249,14 @@ public static class ContractorEndpoints
         else
         {
             existing.DisplayName = req.DisplayName.Trim();
+            existing.City = city;
+            existing.State = state;
+            existing.Zip = zip;
             existing.TradesCsv = tradesCsv;
-            existing.HomeBase = new Point(req.Lng, req.Lat) { SRID = 4326 };
+            existing.HomeBase = new Point(lng, lat) { SRID = 4326 };
             existing.ServiceRadiusMeters = req.ServiceRadiusMeters;
+            existing.IsAvailable = resolvedAvailability;
+            existing.UnavailableReason = resolvedReason;
             existing.UpdatedAt = DateTimeOffset.UtcNow;
         }
 
@@ -221,6 +265,9 @@ public static class ContractorEndpoints
         return Results.Ok(new ContractorProfileResponse(
             existing.DisplayName,
             SplitTrades(existing.TradesCsv),
+            existing.City,
+            existing.State,
+            existing.Zip,
             existing.HomeBase.Y,
             existing.HomeBase.X,
             existing.ServiceRadiusMeters,
@@ -259,6 +306,9 @@ public static class ContractorEndpoints
         return Results.Ok(new ContractorProfileResponse(
             profile.DisplayName,
             SplitTrades(profile.TradesCsv),
+            profile.City,
+            profile.State,
+            profile.Zip,
             profile.HomeBase.Y,
             profile.HomeBase.X,
             profile.ServiceRadiusMeters,
@@ -287,7 +337,8 @@ public static class ContractorEndpoints
             {
                 p.HomeBase,
                 p.ServiceRadiusMeters,
-                p.IsAvailable
+                p.IsAvailable,
+                p.TradesCsv
             })
             .FirstOrDefaultAsync();
 
@@ -305,6 +356,8 @@ public static class ContractorEndpoints
 
         var tradeFilter = (trade ?? "").Trim();
         var hasTradeFilter = !string.IsNullOrWhiteSpace(tradeFilter);
+        var profileTrades = SplitTrades(profile.TradesCsv);
+        var tradeMatches = profileTrades.Length > 0;
 
         var jobs = db.Jobs.AsNoTracking()
             .Where(j => j.Status == JobStatus.Open);
@@ -313,6 +366,10 @@ public static class ContractorEndpoints
         {
             var pattern = $"%{tradeFilter}%";
             jobs = jobs.Where(j => EF.Functions.ILike(j.Trade, pattern));
+        }
+        else if (tradeMatches)
+        {
+            jobs = jobs.Where(j => profileTrades.Any(t => EF.Functions.ILike(j.Trade, t)));
         }
 
         // Build the common projected query (IQueryable) ONCE
@@ -324,6 +381,9 @@ public static class ContractorEndpoints
                 j.Trade,
                 j.Status,
                 j.CreatedAt,
+                j.City,
+                j.State,
+                j.Zip,
                 j.AcceptedBidId,
                 j.CompletedAt,
                 j.SiteLocation,
@@ -363,6 +423,9 @@ public static class ContractorEndpoints
             x.Trade,
             x.Status.ToString(),
             x.CreatedAt,
+            x.City,
+            x.State,
+            x.Zip,
             x.SiteLocation.Y,
             x.SiteLocation.X,
             x.AcceptedBidId,

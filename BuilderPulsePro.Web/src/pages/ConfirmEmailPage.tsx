@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
-import '../App.css'
-
-const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '')
+import { Link as RouterLink, useSearchParams } from 'react-router-dom'
+import { Card, CardContent, Container, Link, Stack, Typography } from '@mui/material'
+import { confirmEmail } from '../services/authService'
 
 type ConfirmState = 'idle' | 'loading' | 'success' | 'error'
 
@@ -26,14 +25,7 @@ function ConfirmEmailPage() {
       setMessage('')
 
       try {
-        const response = await fetch(
-          `${apiBaseUrl}/auth/confirm-email?userId=${encodeURIComponent(userId)}&token=${encodeURIComponent(token)}`,
-        )
-
-        if (!response.ok) {
-          const text = await response.text()
-          throw new Error(text || `Request failed (${response.status})`)
-        }
+        await confirmEmail(userId, token)
 
         setState('success')
         setMessage('Email confirmed. You can log in now.')
@@ -47,20 +39,35 @@ function ConfirmEmailPage() {
     confirm()
   }, [token, userId])
 
-  const messageClass = state === 'error' ? 'error' : state === 'success' ? 'success' : 'page-body'
-
   return (
-    <div className="page-shell">
-      <div className="page-card">
-        <p className="page-kicker">Email confirmation</p>
-        <h1 className="page-title">Confirm your email</h1>
-        {state === 'loading' && <p className="page-body">Confirming your email now…</p>}
-        {state !== 'loading' && <p className={messageClass}>{message}</p>}
-        <div className="page-links">
-          <Link to="/login">Go to login</Link>
-        </div>
-      </div>
-    </div>
+    <Container maxWidth="sm" sx={{ py: 6 }}>
+      <Card elevation={3}>
+        <CardContent>
+          <Stack spacing={3}>
+            <div>
+              <Typography variant="overline" color="primary">
+                Email confirmation
+              </Typography>
+              <Typography variant="h4" fontWeight={700} gutterBottom>
+                Confirm your email
+              </Typography>
+            </div>
+            {state === 'loading' ? (
+              <Typography color="text.secondary">Confirming your email now…</Typography>
+            ) : (
+              <Typography color={state === 'error' ? 'error' : 'success.main'}>
+                {message}
+              </Typography>
+            )}
+            <Typography variant="body2">
+              <Link component={RouterLink} to="/login">
+                Go to login
+              </Link>
+            </Typography>
+          </Stack>
+        </CardContent>
+      </Card>
+    </Container>
   )
 }
 

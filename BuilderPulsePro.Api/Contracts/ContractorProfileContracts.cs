@@ -3,6 +3,9 @@
 public record ContractorProfileResponse(
     string DisplayName,
     string[] Trades,
+    string? City,
+    string? State,
+    string? Zip,
     double Lat,
     double Lng,
     int ServiceRadiusMeters,
@@ -14,9 +17,14 @@ public record ContractorProfileResponse(
 public record UpsertContractorProfileRequest(
     string DisplayName,
     string[] Trades,
+    string? City,
+    string? State,
+    string? Zip,
     double Lat,
     double Lng,
-    int ServiceRadiusMeters
+    int ServiceRadiusMeters,
+    bool? IsAvailable,
+    string? UnavailableReason
 );
 
 public record UpdateContractorAvailabilityRequest(

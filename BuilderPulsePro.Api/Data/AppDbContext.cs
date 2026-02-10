@@ -10,6 +10,7 @@ public class AppDbContext : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>
     public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
 
     public DbSet<Job> Jobs => Set<Job>();
+    public DbSet<JobAttachment> JobAttachments => Set<JobAttachment>();
     public DbSet<Contractor> Contractors => Set<Contractor>();
     public DbSet<ContractorProfile> ContractorProfiles => Set<ContractorProfile>();
     public DbSet<Bid> Bids => Set<Bid>();
@@ -41,6 +42,10 @@ public class AppDbContext : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>
             b.HasKey(x => x.Id);
             b.Property(x => x.Title).HasMaxLength(200).IsRequired();
             b.Property(x => x.Trade).HasMaxLength(100).IsRequired();
+            b.Property(x => x.Description).HasMaxLength(4000);
+            b.Property(x => x.City).HasMaxLength(200);
+            b.Property(x => x.State).HasMaxLength(50);
+            b.Property(x => x.Zip).HasMaxLength(20);
 
             b.Property(x => x.SiteLocation).HasColumnType("geography (point)");
             b.HasIndex(x => x.SiteLocation).HasMethod("gist");
@@ -48,6 +53,25 @@ public class AppDbContext : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>
             b.Property(x => x.CreatedAt).IsRequired();
 
             b.HasIndex(x => x.PostedByUserId);
+        });
+
+        modelBuilder.Entity<JobAttachment>(b =>
+        {
+            b.HasKey(x => x.Id);
+            b.Property(x => x.FileName).HasMaxLength(255).IsRequired();
+            b.Property(x => x.ContentType).HasMaxLength(200).IsRequired();
+            b.Property(x => x.StorageProvider).HasMaxLength(50).IsRequired();
+            b.Property(x => x.StorageKey).HasMaxLength(500).IsRequired();
+            b.Property(x => x.StorageUrl).HasMaxLength(2000);
+            b.Property(x => x.Content).HasColumnType("bytea");
+            b.Property(x => x.CreatedAt).IsRequired();
+
+            b.HasIndex(x => x.JobId);
+
+            b.HasOne<Job>()
+                .WithMany()
+                .HasForeignKey(x => x.JobId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<Job>()
@@ -79,6 +103,9 @@ public class AppDbContext : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>
             b.HasKey(x => x.UserId);
 
             b.Property(x => x.DisplayName).HasMaxLength(200).IsRequired();
+            b.Property(x => x.City).HasMaxLength(200);
+            b.Property(x => x.State).HasMaxLength(50);
+            b.Property(x => x.Zip).HasMaxLength(20);
             b.Property(x => x.TradesCsv).HasMaxLength(500).IsRequired();
 
             b.Property(x => x.HomeBase).HasColumnType("geography (point)");

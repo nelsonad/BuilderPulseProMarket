@@ -1,66 +1,137 @@
 import React from 'react';
-import {Pressable, Text, TextInput, View} from 'react-native';
+import {View} from 'react-native';
+import {Button, Card, Chip, Text, TextInput} from 'react-native-paper';
 import {styles} from '../styles';
 
 type PostJobScreenProps = {
   title: string;
   trade: string;
-  lat: string;
-  lng: string;
+  description: string;
+  city: string;
+  state: string;
+  zip: string;
   message: string;
   error: string;
   onTitleChange: (value: string) => void;
   onTradeChange: (value: string) => void;
-  onLatChange: (value: string) => void;
-  onLngChange: (value: string) => void;
+  onDescriptionChange: (value: string) => void;
+  onCityChange: (value: string) => void;
+  onStateChange: (value: string) => void;
+  onZipChange: (value: string) => void;
   onSubmit: () => void;
-  onBackToJobs: () => void;
-  onBack: () => void;
+  onBackToDashboard: () => void;
 };
 
 const PostJobScreen = ({
   title,
   trade,
-  lat,
-  lng,
+  description,
+  city,
+  state,
+  zip,
   message,
   error,
   onTitleChange,
   onTradeChange,
-  onLatChange,
-  onLngChange,
+  onDescriptionChange,
+  onCityChange,
+  onStateChange,
+  onZipChange,
   onSubmit,
-  onBackToJobs,
-  onBack,
+  onBackToDashboard,
 }: PostJobScreenProps) => (
-  <View style={styles.card}>
-    <Text style={styles.kicker}>Post a job</Text>
-    <Text style={styles.title}>Share your next project</Text>
-    <Text style={styles.body}>Add project details and connect with contractors.</Text>
-    <View style={styles.form}>
-      <Text style={styles.label}>Title</Text>
-      <TextInput style={styles.input} value={title} onChangeText={onTitleChange} />
-      <Text style={styles.label}>Trade</Text>
-      <TextInput style={styles.input} value={trade} onChangeText={onTradeChange} />
-      <Text style={styles.label}>Latitude</Text>
-      <TextInput style={styles.input} value={lat} onChangeText={onLatChange} />
-      <Text style={styles.label}>Longitude</Text>
-      <TextInput style={styles.input} value={lng} onChangeText={onLngChange} />
-      <Pressable style={styles.buttonPrimary} onPress={onSubmit}>
-        <Text style={styles.buttonTextPrimary}>Submit job</Text>
-      </Pressable>
-      {message ? <Text style={styles.success}>{message}</Text> : null}
-      {error ? <Text style={styles.error}>{error}</Text> : null}
-    </View>
-    <View style={styles.linkRow}>
-      <Pressable onPress={onBackToJobs}>
-        <Text style={styles.link}>Browse jobs</Text>
-      </Pressable>
-      <Pressable onPress={onBack}>
-        <Text style={styles.link}>Back to landing</Text>
-      </Pressable>
-    </View>
-  </View>
+  <Card style={styles.card}>
+    <Card.Content>
+      <Text style={styles.kicker}>Post a job</Text>
+      <Text style={styles.title}>Share your next project</Text>
+      <Text style={styles.body}>
+        Add project details and connect with contractors.
+      </Text>
+      <View style={styles.form}>
+        <TextInput
+          mode="outlined"
+          label="Title"
+          style={styles.input}
+          value={title}
+          onChangeText={onTitleChange}
+        />
+        <Text style={styles.label}>Trade</Text>
+        <View style={{flexDirection: 'row', flexWrap: 'wrap'}}>
+          {[
+            'Cabinetry',
+            'Carpentry',
+            'Concrete',
+            'Doors',
+            'Drywall',
+            'Electrical',
+            'Excavating',
+            'Flooring',
+            'Foundation',
+            'Framing',
+            'General Contracting',
+            'Glass',
+            'HVAC',
+            'Landscaping',
+            'Masonry',
+            'Painting',
+            'Plumbing',
+            'Remodeling',
+            'Roofing',
+            'Siding',
+            'Tiling',
+            'Windows',
+          ].map(option => (
+            <Chip
+              key={option}
+              selected={trade === option}
+              onPress={() => onTradeChange(option)}
+              style={{marginBottom: 8, marginRight: 8}}>
+              {option}
+            </Chip>
+          ))}
+        </View>
+        <TextInput
+          mode="outlined"
+          label="City"
+          style={styles.input}
+          value={city}
+          onChangeText={onCityChange}
+        />
+        <TextInput
+          mode="outlined"
+          label="Description"
+          style={styles.input}
+          value={description}
+          onChangeText={onDescriptionChange}
+          multiline
+        />
+        <TextInput
+          mode="outlined"
+          label="State"
+          style={styles.input}
+          value={state}
+          onChangeText={onStateChange}
+        />
+        <TextInput
+          mode="outlined"
+          label="Zip code"
+          style={styles.input}
+          value={zip}
+          onChangeText={onZipChange}
+        />
+        <Button mode="contained" onPress={onSubmit}>
+          Submit job
+        </Button>
+        {message ? <Text style={styles.success}>{message}</Text> : null}
+        {error ? <Text style={styles.error}>{error}</Text> : null}
+      </View>
+      <View style={styles.linkRow}>
+        <Button mode="text" onPress={onBackToDashboard}>
+          Back to dashboard
+        </Button>
+      </View>
+    </Card.Content>
+  </Card>
 );
 
 export default PostJobScreen;

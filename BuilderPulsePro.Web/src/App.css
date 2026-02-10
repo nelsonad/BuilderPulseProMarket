@@ -1,6 +1,5 @@
 #root {
   min-height: 100vh;
-  text-align: center;
   width: 100%;
 }
 
@@ -11,9 +10,87 @@ body {
   color: #111827;
 }
 
+.app-shell {
+  min-height: 100vh;
+  background: #f5f7fb;
+}
+
+.app-header {
+  height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 2rem;
+  background: #ffffff;
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.app-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #111827;
+}
+
+.app-content {
+  padding: 0;
+}
+
+.profile-menu {
+  position: relative;
+}
+
+.profile-button {
+  border: none;
+  background: #e5e7eb;
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.profile-icon {
+  font-size: 1.1rem;
+}
+
+.profile-dropdown {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.75rem);
+  background: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 16px 32px rgba(15, 23, 42, 0.12);
+  padding: 0.5rem;
+  min-width: 160px;
+  display: grid;
+  gap: 0.35rem;
+  z-index: 20;
+}
+
+.profile-action {
+  border: none;
+  background: transparent;
+  padding: 0.6rem 0.75rem;
+  border-radius: 8px;
+  text-align: left;
+  font-weight: 600;
+  color: #111827;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.profile-action:hover {
+  background: #f3f4f6;
+}
+
 .landing {
   display: flex;
-  min-height: 100vh;
+  min-height: calc(100vh - 72px);
   align-items: center;
   justify-content: center;
   padding: 0 2rem 2rem;
@@ -95,7 +172,7 @@ body {
 }
 
 .page-shell {
-  min-height: 100vh;
+  min-height: calc(100vh - 72px);
   display: flex;
   align-items: center;
   justify-content: center;

@@ -1,8 +1,17 @@
-import { type FormEvent, useState } from 'react'
-import { Link } from 'react-router-dom'
-import '../App.css'
-
-const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '')
+import { type ChangeEvent, type FormEvent, useState } from 'react'
+import { Link as RouterLink } from 'react-router-dom'
+import {
+  Box,
+  Button,
+  Card,
+  CardContent,
+  Container,
+  Link,
+  Stack,
+  TextField,
+  Typography,
+} from '@mui/material'
+import { register } from '../services/authService'
 
 function SignUpPage() {
   const [email, setEmail] = useState('')
@@ -59,16 +68,7 @@ function SignUpPage() {
     }
 
     try {
-      const response = await fetch(`${apiBaseUrl}/auth/register`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: email.trim(), password }),
-      })
-
-      if (!response.ok) {
-        const text = await response.text()
-        throw new Error(text || `Request failed (${response.status})`)
-      }
+      await register(email.trim(), password)
 
       setSubmitSuccess('Account created. Check your email to confirm your account.')
     } catch (err) {
@@ -78,53 +78,77 @@ function SignUpPage() {
   }
 
   return (
-    <div className="page-shell">
-      <div className="page-card">
-        <p className="page-kicker">Get started</p>
-        <h1 className="page-title">Create your BuilderPulse Pro account</h1>
-        <p className="page-body">Join to post projects or bid on the right jobs.</p>
-        <form className="form" onSubmit={handleSubmit} noValidate>
-          <label>
-            Email address
-            <input
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              type="email"
-              autoComplete="email"
-            />
-          </label>
-          {emailError && <span className="error">{emailError}</span>}
-          <label>
-            Password
-            <input
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              type="password"
-              autoComplete="new-password"
-            />
-          </label>
-          {passwordError && <span className="error">{passwordError}</span>}
-          <label>
-            Confirm password
-            <input
-              value={confirmPassword}
-              onChange={(event) => setConfirmPassword(event.target.value)}
-              type="password"
-              autoComplete="new-password"
-            />
-          </label>
-          {confirmError && <span className="error">{confirmError}</span>}
-          <button className="button primary" type="submit">
-            Create account
-          </button>
-          {submitError && <span className="error">{submitError}</span>}
-          {submitSuccess && <span className="success">{submitSuccess}</span>}
-        </form>
-        <div className="page-links">
-          <Link to="/login">Already have an account? Log in</Link>
-        </div>
-      </div>
-    </div>
+    <Container maxWidth="sm" sx={{ py: 6 }}>
+      <Card elevation={3}>
+        <CardContent>
+          <Stack spacing={3}>
+            <Box>
+              <Typography variant="overline" color="primary">
+                Get started
+              </Typography>
+              <Typography variant="h4" fontWeight={700} gutterBottom>
+                Create your BuilderPulse Pro account
+              </Typography>
+              <Typography color="text.secondary">
+                Join to post projects or bid on the right jobs.
+              </Typography>
+            </Box>
+            <Box component="form" onSubmit={handleSubmit} noValidate>
+              <Stack spacing={2}>
+                <TextField
+                  label="Email address"
+                  value={email}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => setEmail(event.target.value)}
+                  type="email"
+                  autoComplete="email"
+                  error={Boolean(emailError)}
+                  helperText={emailError}
+                  fullWidth
+                />
+                <TextField
+                  label="Password"
+                  value={password}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => setPassword(event.target.value)}
+                  type="password"
+                  autoComplete="new-password"
+                  error={Boolean(passwordError)}
+                  helperText={passwordError}
+                  fullWidth
+                />
+                <TextField
+                  label="Confirm password"
+                  value={confirmPassword}
+                  onChange={(event: ChangeEvent<HTMLInputElement>) => setConfirmPassword(event.target.value)}
+                  type="password"
+                  autoComplete="new-password"
+                  error={Boolean(confirmError)}
+                  helperText={confirmError}
+                  fullWidth
+                />
+                <Button variant="contained" size="large" type="submit">
+                  Create account
+                </Button>
+                {submitError && (
+                  <Typography color="error" variant="body2">
+                    {submitError}
+                  </Typography>
+                )}
+                {submitSuccess && (
+                  <Typography color="success.main" variant="body2">
+                    {submitSuccess}
+                  </Typography>
+                )}
+              </Stack>
+            </Box>
+            <Typography variant="body2">
+              <Link component={RouterLink} to="/login">
+                Already have an account? Log in
+              </Link>
+            </Typography>
+          </Stack>
+        </CardContent>
+      </Card>
+    </Container>
   )
 }
 

@@ -9,6 +9,10 @@ public class ContractorProfile
 
     public string DisplayName { get; set; } = "";
 
+    public string? City { get; set; }
+    public string? State { get; set; }
+    public string? Zip { get; set; }
+
     // MVP: comma-separated string like "Plumbing,Electrical"
     // Later: normalize into join table
     public string TradesCsv { get; set; } = "";
