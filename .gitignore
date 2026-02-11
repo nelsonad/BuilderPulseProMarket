@@ -42,6 +42,9 @@
 **/*.xcuserstate
 **/*.xcuserdata
 
+# Scripts
+**/run-android.log
+
 # IDEs
 .idea/
 

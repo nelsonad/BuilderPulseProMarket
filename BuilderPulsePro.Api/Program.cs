@@ -118,16 +118,12 @@ builder.Services.AddSingleton<ConsoleEmailSender>();
 builder.Services.AddSingleton<IEmailSender>(sp => sp.GetRequiredService<ConsoleEmailSender>());
 builder.Services.AddSingleton<IEmailStore>(sp => sp.GetRequiredService<ConsoleEmailSender>());
 
-builder.Services.AddScoped<JobDigestRunner>();
-
 // Email handlers
 builder.Services.AddScoped<IEventHandler<JobPosted>, EnqueueJobPostedDigestItems>();
 builder.Services.AddScoped<IEventHandler<BidPlaced>, EmailOnBidPlaced>();
 builder.Services.AddScoped<IEventHandler<BidAccepted>, EmailOnBidAccepted>();
 builder.Services.AddScoped<IEventHandler<JobCompleted>, EmailOnJobCompleted>();
 builder.Services.AddScoped<IEventHandler<MessagePosted>, EmailOnMessagePosted>();
-
-builder.Services.AddHostedService<JobPostedDigestBackgroundService>();
 
 var app = builder.Build();
 

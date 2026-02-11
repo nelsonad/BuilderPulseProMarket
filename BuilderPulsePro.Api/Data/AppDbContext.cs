@@ -10,6 +10,7 @@ public class AppDbContext : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>
     public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
 
     public DbSet<Job> Jobs => Set<Job>();
+    public DbSet<Attachment> Attachments => Set<Attachment>();
     public DbSet<JobAttachment> JobAttachments => Set<JobAttachment>();
     public DbSet<Contractor> Contractors => Set<Contractor>();
     public DbSet<ContractorProfile> ContractorProfiles => Set<ContractorProfile>();
@@ -55,7 +56,7 @@ public class AppDbContext : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>
             b.HasIndex(x => x.PostedByUserId);
         });
 
-        modelBuilder.Entity<JobAttachment>(b =>
+        modelBuilder.Entity<Attachment>(b =>
         {
             b.HasKey(x => x.Id);
             b.Property(x => x.FileName).HasMaxLength(255).IsRequired();
@@ -65,12 +66,22 @@ public class AppDbContext : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>
             b.Property(x => x.StorageUrl).HasMaxLength(2000);
             b.Property(x => x.Content).HasColumnType("bytea");
             b.Property(x => x.CreatedAt).IsRequired();
+        });
 
+        modelBuilder.Entity<JobAttachment>(b =>
+        {
+            b.HasKey(x => new { x.JobId, x.AttachmentId });
             b.HasIndex(x => x.JobId);
+            b.HasIndex(x => x.AttachmentId);
 
             b.HasOne<Job>()
                 .WithMany()
                 .HasForeignKey(x => x.JobId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            b.HasOne(x => x.Attachment)
+                .WithMany()
+                .HasForeignKey(x => x.AttachmentId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

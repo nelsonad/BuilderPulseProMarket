@@ -214,21 +214,29 @@ public static class JobsEndpoints
         if (files.Count == 0)
             return Results.BadRequest("At least one attachment is required.");
 
-        var attachments = new List<JobAttachment>();
+        var attachments = new List<Attachment>();
+        var jobAttachments = new List<JobAttachment>();
 
         foreach (var file in files)
         {
             if (file.Length <= 0)
                 continue;
 
-            var attachment = await helper.SaveAsync(id, file, ct);
+            var attachment = await helper.SaveAsync(file, ct);
             attachments.Add(attachment);
+            jobAttachments.Add(new JobAttachment
+            {
+                JobId = id,
+                AttachmentId = attachment.Id,
+                Attachment = attachment
+            });
         }
 
         if (attachments.Count == 0)
             return Results.BadRequest("At least one attachment is required.");
 
-        db.JobAttachments.AddRange(attachments);
+        db.Attachments.AddRange(attachments);
+        db.JobAttachments.AddRange(jobAttachments);
         await db.SaveChangesAsync(ct);
 
         var response = attachments.Select(a => ToJobAttachmentResponse(id, a)).ToList();
@@ -239,6 +247,7 @@ public static class JobsEndpoints
     {
         var attachments = await db.JobAttachments.AsNoTracking()
             .Where(a => a.JobId == id)
+            .Select(a => a.Attachment)
             .OrderByDescending(a => a.CreatedAt)
             .ToListAsync();
 
@@ -256,7 +265,9 @@ public static class JobsEndpoints
         bool download = false)
     {
         var attachment = await db.JobAttachments.AsNoTracking()
-            .FirstOrDefaultAsync(a => a.Id == attachmentId && a.JobId == id);
+            .Where(a => a.JobId == id && a.AttachmentId == attachmentId)
+            .Select(a => a.Attachment)
+            .FirstOrDefaultAsync();
 
         if (attachment is null) return Results.NotFound("Attachment not found.");
 
@@ -291,15 +302,28 @@ public static class JobsEndpoints
         if (job is null) return Results.NotFound("Job not found.");
         if (job.PostedByUserId != userId) return Results.Forbid();
 
-        var attachment = await db.JobAttachments
-            .FirstOrDefaultAsync(a => a.Id == attachmentId && a.JobId == id, ct);
+        var jobAttachment = await db.JobAttachments
+            .Include(a => a.Attachment)
+            .FirstOrDefaultAsync(a => a.AttachmentId == attachmentId && a.JobId == id, ct);
+
+        if (jobAttachment is null) return Results.NotFound("Attachment not found.");
+
+        var attachment = jobAttachment.Attachment;
 
         if (attachment is null) return Results.NotFound("Attachment not found.");
 
-        await helper.DeleteAsync(attachment, ct);
-
-        db.JobAttachments.Remove(attachment);
+        db.JobAttachments.Remove(jobAttachment);
         await db.SaveChangesAsync(ct);
+
+        var stillLinked = await db.JobAttachments
+            .AnyAsync(a => a.AttachmentId == attachment.Id, ct);
+
+        if (!stillLinked)
+        {
+            await helper.DeleteAsync(attachment, ct);
+            db.Attachments.Remove(attachment);
+            await db.SaveChangesAsync(ct);
+        }
 
         return Results.NoContent();
     }
@@ -690,7 +714,7 @@ public static class JobsEndpoints
         return rows.Select(ToJobResponse);
     }
 
-    private static JobAttachmentResponse ToJobAttachmentResponse(Guid jobId, JobAttachment attachment)
+    private static JobAttachmentResponse ToJobAttachmentResponse(Guid jobId, Attachment attachment)
     {
         var url = string.IsNullOrWhiteSpace(attachment.StorageUrl)
             ? $"/jobs/{jobId}/attachments/{attachment.Id}"
@@ -698,7 +722,7 @@ public static class JobsEndpoints
 
         return new JobAttachmentResponse(
             attachment.Id,
-            attachment.JobId,
+            jobId,
             attachment.FileName,
             attachment.ContentType,
             attachment.SizeBytes,

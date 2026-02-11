@@ -1,3 +1,7 @@
 <Project Sdk="Microsoft.VisualStudio.JavaScript.Sdk/1.0.2752196">
-
+  <ItemGroup>
+    <Folder Include="android\app\src\debug\java\com\builderpulseproapp\" />
+    <Folder Include="android\app\src\main\java\com\builderpulseproapp\newarchitecture\components\" />
+    <Folder Include="android\app\src\main\java\com\builderpulseproapp\newarchitecture\modules\" />
+  </ItemGroup>
 </Project>

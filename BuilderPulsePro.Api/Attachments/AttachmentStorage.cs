@@ -34,7 +34,7 @@ public sealed class AttachmentStorageOptions
 }
 
 public sealed record AttachmentUpload(
-    Guid JobId,
+    Guid AttachmentId,
     string FileName,
     string ContentType,
     long SizeBytes,
@@ -52,12 +52,12 @@ public sealed record AttachmentStorageResult(
 public interface IAttachmentStorage
 {
     Task<AttachmentStorageResult> SaveAsync(AttachmentUpload upload, CancellationToken ct);
-    Task DeleteAsync(JobAttachment attachment, CancellationToken ct);
+    Task DeleteAsync(Attachment attachment, CancellationToken ct);
 }
 
 public sealed class AttachmentHelper(IAttachmentStorage storage)
 {
-    public async Task<JobAttachment> SaveAsync(Guid jobId, IFormFile file, CancellationToken ct)
+    public async Task<Attachment> SaveAsync(IFormFile file, CancellationToken ct)
     {
         await using var stream = file.OpenReadStream();
         var contentType = string.IsNullOrWhiteSpace(file.ContentType)
@@ -71,25 +71,27 @@ public sealed class AttachmentHelper(IAttachmentStorage storage)
                 contentType = inferredType;
         }
 
-        var upload = new AttachmentUpload(jobId, file.FileName, contentType, file.Length, stream);
-        var result = await storage.SaveAsync(upload, ct);
-
-        return new JobAttachment
+        var attachment = new Attachment
         {
             Id = Guid.NewGuid(),
-            JobId = jobId,
             FileName = file.FileName,
             ContentType = contentType,
-            SizeBytes = result.SizeBytes,
-            StorageProvider = result.StorageProvider,
-            StorageKey = result.StorageKey,
-            StorageUrl = result.StorageUrl,
-            Content = result.Content,
             CreatedAt = DateTimeOffset.UtcNow
         };
+
+        var upload = new AttachmentUpload(attachment.Id, file.FileName, contentType, file.Length, stream);
+        var result = await storage.SaveAsync(upload, ct);
+
+        attachment.SizeBytes = result.SizeBytes;
+        attachment.StorageProvider = result.StorageProvider;
+        attachment.StorageKey = result.StorageKey;
+        attachment.StorageUrl = result.StorageUrl;
+        attachment.Content = result.Content;
+
+        return attachment;
     }
 
-    public Task DeleteAsync(JobAttachment attachment, CancellationToken ct)
+    public Task DeleteAsync(Attachment attachment, CancellationToken ct)
         => storage.DeleteAsync(attachment, ct);
 }
 
@@ -108,7 +110,7 @@ public sealed class AttachmentStorage(IOptions<AttachmentStorageOptions> options
         return SaveToDatabaseAsync(upload, ct);
     }
 
-    public Task DeleteAsync(JobAttachment attachment, CancellationToken ct)
+    public Task DeleteAsync(Attachment attachment, CancellationToken ct)
     {
         if (_options.UseAwsStorage)
             return DeleteFromAwsAsync(attachment, ct);
@@ -134,7 +136,7 @@ public sealed class AttachmentStorage(IOptions<AttachmentStorageOptions> options
         );
     }
 
-    private async Task DeleteFromAwsAsync(JobAttachment attachment, CancellationToken ct)
+    private async Task DeleteFromAwsAsync(Attachment attachment, CancellationToken ct)
     {
         var aws = _options.Aws;
         if (string.IsNullOrWhiteSpace(aws.BucketName))
@@ -166,7 +168,7 @@ public sealed class AttachmentStorage(IOptions<AttachmentStorageOptions> options
 
         var regionName = string.IsNullOrWhiteSpace(aws.Region) ? "us-east-1" : aws.Region.Trim();
         var region = RegionEndpoint.GetBySystemName(regionName);
-        var key = BuildStorageKey(upload.JobId, upload.FileName);
+        var key = BuildStorageKey(upload.AttachmentId, upload.FileName);
 
         var credentials = string.IsNullOrWhiteSpace(aws.AccessKeyId)
             ? null
@@ -197,7 +199,7 @@ public sealed class AttachmentStorage(IOptions<AttachmentStorageOptions> options
         );
     }
 
-    private async Task DeleteFromAzureAsync(JobAttachment attachment, CancellationToken ct)
+    private async Task DeleteFromAzureAsync(Attachment attachment, CancellationToken ct)
     {
         var azure = _options.Azure;
         if (string.IsNullOrWhiteSpace(azure.ConnectionString))
@@ -223,7 +225,7 @@ public sealed class AttachmentStorage(IOptions<AttachmentStorageOptions> options
         var container = new BlobContainerClient(azure.ConnectionString, azure.ContainerName);
         await container.CreateIfNotExistsAsync(cancellationToken: ct);
 
-        var blobName = BuildStorageKey(upload.JobId, upload.FileName);
+        var blobName = BuildStorageKey(upload.AttachmentId, upload.FileName);
         var blob = container.GetBlobClient(blobName);
 
         await blob.UploadAsync(upload.Content, new BlobHttpHeaders { ContentType = upload.ContentType }, cancellationToken: ct);
@@ -237,9 +239,9 @@ public sealed class AttachmentStorage(IOptions<AttachmentStorageOptions> options
         );
     }
 
-    private static string BuildStorageKey(Guid jobId, string fileName)
+    private static string BuildStorageKey(Guid attachmentId, string fileName)
     {
         var safeName = Path.GetFileName(fileName).Replace(" ", "-");
-        return $"jobs/{jobId:D}/{Guid.NewGuid():N}/{safeName}";
+        return $"attachments/{attachmentId:D}/{safeName}";
     }
 }

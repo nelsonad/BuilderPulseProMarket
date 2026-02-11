@@ -53,3 +53,4 @@ export type RecommendedJob = Job & {
   distanceMeters: number;
   hasBidByMe: boolean;
 };
+
