@@ -16,6 +16,7 @@ public record MyBidResponse(
     int? DurationDays,
     string Notes,
     bool IsAccepted,
+    string Status,
     DateTimeOffset BidCreatedAt,
     MyBidJobInfo Job
 );

@@ -16,7 +16,6 @@ import MessageAttachmentViewer from './MessageAttachmentViewer'
 import {
   type ConversationSummary,
   type Message,
-  type MessageAttachment,
   createMessagingHubConnection,
   getUserIdFromToken,
   listJobConversations,
@@ -38,6 +37,7 @@ const allowedExtensions = new Set(
 type JobMessagesPanelProps = {
   jobId: string
   mode: 'client' | 'contractor'
+  initialContractorId?: string | null
 }
 
 const formatTimestamp = (value: string) => {
@@ -56,7 +56,7 @@ const formatTimestamp = (value: string) => {
   })
 }
 
-function JobMessagesPanel({ jobId, mode }: JobMessagesPanelProps) {
+function JobMessagesPanel({ jobId, mode, initialContractorId }: JobMessagesPanelProps) {
   const token = getAuthToken()
   const userId = useMemo(() => getUserIdFromToken(token), [token])
   const [conversations, setConversations] = useState<ConversationSummary[]>([])
@@ -91,11 +91,6 @@ function JobMessagesPanel({ jobId, mode }: JobMessagesPanelProps) {
 
     return seenMessages.length > 0 ? seenMessages[seenMessages.length - 1].messageId : null
   }, [messages, userId])
-
-  const activeConversation = useMemo(
-    () => conversations.find((c) => c.contractorProfileId === selectedContractorId) ?? null,
-    [conversations, selectedContractorId],
-  )
 
   useEffect(() => {
     if (!token) {
@@ -143,6 +138,16 @@ function JobMessagesPanel({ jobId, mode }: JobMessagesPanelProps) {
       isActive = false
     }
   }, [jobId, mode, selectedContractorId, token, userId])
+
+  useEffect(() => {
+    if (mode !== 'client') {
+      return
+    }
+
+    if (initialContractorId && initialContractorId !== selectedContractorId) {
+      setSelectedContractorId(initialContractorId)
+    }
+  }, [initialContractorId, mode, selectedContractorId])
 
   useEffect(() => {
     if (!token || !selectedContractorId) {

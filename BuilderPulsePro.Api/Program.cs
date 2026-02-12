@@ -1,5 +1,6 @@
 using BuilderPulsePro.Api.Auth;
 using BuilderPulsePro.Api.Attachments;
+using BuilderPulsePro.Api.Bids;
 using BuilderPulsePro.Api.Contracts;
 using BuilderPulsePro.Api.Data;
 using BuilderPulsePro.Api.Domain;
@@ -115,19 +116,33 @@ builder.Services.Configure<JobDigestOptions>(
 builder.Services.Configure<AttachmentStorageOptions>(
     builder.Configuration.GetSection("Attachments"));
 
+builder.Services.Configure<OpenAiOptions>(
+    builder.Configuration.GetSection("OpenAI"));
+
 builder.Services.AddSingleton<IAttachmentStorage, AttachmentStorage>();
 builder.Services.AddSingleton<AttachmentHelper>();
 
 builder.Services.AddSingleton<IEventBus, InProcessEventBus>();
+builder.Services.AddHttpClient<IBidAttachmentParser, OpenAiBidAttachmentParser>(client =>
+{
+    client.BaseAddress = new Uri("https://api.openai.com/v1/");
+});
+builder.Services.AddHostedService<BidAttachmentParseWorker>();
 
 // logging handlers
 builder.Services.AddScoped<IEventHandler<JobPosted>, LogJobPosted>();
 builder.Services.AddScoped<IEventHandler<BidPlaced>, LogBidPlaced>();
 builder.Services.AddScoped<IEventHandler<BidAccepted>, LogBidAccepted>();
+builder.Services.AddScoped<IEventHandler<BidUpdated>, LogBidUpdated>();
+builder.Services.AddScoped<IEventHandler<BidWithdrawn>, LogBidWithdrawn>();
+builder.Services.AddScoped<IEventHandler<BidRejected>, LogBidRejected>();
 builder.Services.AddScoped<IEventHandler<JobCompleted>, LogJobCompleted>();
 builder.Services.AddScoped<IEventHandler<JobPosted>, PersistJobPostedActivity>();
 builder.Services.AddScoped<IEventHandler<BidPlaced>, PersistBidPlacedActivity>();
 builder.Services.AddScoped<IEventHandler<BidAccepted>, PersistBidAcceptedActivity>();
+builder.Services.AddScoped<IEventHandler<BidUpdated>, PersistBidUpdatedActivity>();
+builder.Services.AddScoped<IEventHandler<BidWithdrawn>, PersistBidWithdrawnActivity>();
+builder.Services.AddScoped<IEventHandler<BidRejected>, PersistBidRejectedActivity>();
 builder.Services.AddScoped<IEventHandler<JobCompleted>, PersistJobCompletedActivity>();
 
 // Email sender (console)
@@ -139,6 +154,9 @@ builder.Services.AddSingleton<IEmailStore>(sp => sp.GetRequiredService<ConsoleEm
 builder.Services.AddScoped<IEventHandler<JobPosted>, EnqueueJobPostedDigestItems>();
 builder.Services.AddScoped<IEventHandler<BidPlaced>, EmailOnBidPlaced>();
 builder.Services.AddScoped<IEventHandler<BidAccepted>, EmailOnBidAccepted>();
+builder.Services.AddScoped<IEventHandler<BidUpdated>, EmailOnBidUpdated>();
+builder.Services.AddScoped<IEventHandler<BidWithdrawn>, EmailOnBidWithdrawn>();
+builder.Services.AddScoped<IEventHandler<BidRejected>, EmailOnBidRejected>();
 builder.Services.AddScoped<IEventHandler<JobCompleted>, EmailOnJobCompleted>();
 builder.Services.AddScoped<IEventHandler<MessagePosted>, EmailOnMessagePosted>();
 
@@ -201,5 +219,6 @@ app.MapContractorEndpoints();
 app.MapAdminEndpoints();
 app.MapMessagingEndpoints();
 app.MapHub<MessagingHub>("/hubs/messages");
+app.MapHub<BidProcessingHub>("/hubs/bids");
 
 app.Run();

@@ -15,6 +15,8 @@ import {
 } from '@mui/material'
 import AttachmentViewer from '../components/AttachmentViewer'
 import JobMessagesPanel from '../components/JobMessagesPanel'
+import { type Bid, getBidsForJob } from '../services/bidsService'
+import { listJobConversations } from '../services/messagingService'
 import {
   getJob,
   getJobAttachments,
@@ -43,6 +45,11 @@ function JobDetailsPage() {
   const [zip, setZip] = useState('')
   const [newAttachments, setNewAttachments] = useState<File[]>([])
   const [activeTab, setActiveTab] = useState('details')
+  const [bids, setBids] = useState<Bid[]>([])
+  const [bidsError, setBidsError] = useState('')
+  const [bidsLoading, setBidsLoading] = useState(false)
+  const [contractorLookup, setContractorLookup] = useState<Record<string, string>>({})
+  const [messageContractorId, setMessageContractorId] = useState<string | null>(null)
 
   const formattedCreatedAt = job?.createdAt
     ? new Date(job.createdAt).toLocaleString('en-US', {
@@ -107,6 +114,70 @@ function JobDetailsPage() {
       isActive = false
     }
   }, [jobId])
+
+  useEffect(() => {
+    if (!jobId || activeTab !== 'bids') {
+      return
+    }
+
+    const token = getAuthToken()
+    if (!token) {
+      setAuthRedirect(location.pathname)
+      navigate('/login')
+      return
+    }
+
+    let isActive = true
+
+    const loadBids = async () => {
+      setBidsLoading(true)
+      setBidsError('')
+
+      try {
+        const [bidResponse, conversationResponse] = await Promise.all([
+          getBidsForJob(token, jobId),
+          listJobConversations(token, jobId),
+        ])
+
+        if (!isActive) {
+          return
+        }
+
+        setBids(bidResponse ?? [])
+        const lookup = conversationResponse.reduce<Record<string, string>>((acc, conversation) => {
+          acc[conversation.contractorProfileId] = conversation.contractorDisplayName
+          return acc
+        }, {})
+        setContractorLookup(lookup)
+      } catch (err) {
+        if (!isActive) {
+          return
+        }
+        const message = err instanceof Error ? err.message : 'Unable to load bids.'
+        setBidsError(message)
+      } finally {
+        if (isActive) {
+          setBidsLoading(false)
+        }
+      }
+    }
+
+    loadBids()
+
+    return () => {
+      isActive = false
+    }
+  }, [activeTab, jobId, location.pathname, navigate])
+
+  const formatCurrency = (amountCents: number) => `$${(amountCents / 100).toFixed(2)}`
+  const formatDate = (value?: string | null) =>
+    value
+      ? new Date(value).toLocaleDateString('en-US', {
+          month: 'short',
+          day: 'numeric',
+          year: 'numeric',
+        })
+      : '—'
 
   const handleSave = async () => {
     setErrorMessage('')
@@ -283,48 +354,116 @@ function JobDetailsPage() {
                       Save changes
                     </Button>
                   </Stack>
+                  <AttachmentViewer
+                    attachments={attachments}
+                    onDeleteAttachment={async (attachment) => {
+                      if (!jobId) {
+                        return
+                      }
+
+                      const token = getAuthToken()
+                      if (!token) {
+                        setAuthRedirect(location.pathname)
+                        navigate('/login')
+                        return
+                      }
+
+                      try {
+                        await deleteJobAttachment(token, jobId, attachment.id)
+                        setAttachments((current) =>
+                          current.filter((item) => item.id !== attachment.id),
+                        )
+                      } catch (err) {
+                        const message = err instanceof Error ? err.message : 'Unable to delete attachment.'
+                        setErrorMessage(message)
+                      }
+                    }}
+                  />
                 </Stack>
               ) : activeTab === 'messages' ? (
                 jobId ? (
-                  <JobMessagesPanel jobId={jobId} mode="client" />
+                  <JobMessagesPanel
+                    jobId={jobId}
+                    mode="client"
+                    initialContractorId={messageContractorId}
+                  />
                 ) : (
                   <Typography color="text.secondary">
                     Select a job to view messages.
                   </Typography>
                 )
               ) : (
-                <Typography color="text.secondary">
-                  Bids will appear here once available.
-                </Typography>
+                <Stack spacing={2}>
+                  {bidsLoading && <Typography color="text.secondary">Loading bids...</Typography>}
+                  {bidsError && <Typography color="error">{bidsError}</Typography>}
+                  {!bidsLoading && !bidsError && bids.length === 0 ? (
+                    <Typography color="text.secondary">No bids yet.</Typography>
+                  ) : null}
+                  {!bidsLoading && !bidsError && bids.length > 0 ? (
+                    <Stack spacing={2}>
+                      {bids.map((bid) => (
+                        <Card key={bid.id} variant="outlined">
+                          <CardContent>
+                            <Stack spacing={1}>
+                              <Typography fontWeight={600}>
+                                {contractorLookup[bid.contractorProfileId] ?? 'Contractor'}
+                              </Typography>
+                              <Stack
+                                direction={{ xs: 'column', sm: 'row' }}
+                                spacing={2}
+                                justifyContent="space-between"
+                              >
+                                <Stack spacing={0.5}>
+                                  <Typography color="text.secondary">
+                                    Amount: {formatCurrency(bid.amountCents)}
+                                  </Typography>
+                                  <Typography color="text.secondary">
+                                    Status: {bid.status}
+                                  </Typography>
+                                  <Typography color="text.secondary">
+                                    Valid until: {formatDate(bid.validUntil)}
+                                  </Typography>
+                                  {bid.durationDays ? (
+                                    <Typography color="text.secondary">
+                                      Duration: {bid.durationDays} days
+                                    </Typography>
+                                  ) : null}
+                                  {bid.earliestStart ? (
+                                    <Typography color="text.secondary">
+                                      Earliest start: {formatDate(bid.earliestStart)}
+                                    </Typography>
+                                  ) : null}
+                                </Stack>
+                                <Stack spacing={1} alignItems={{ xs: 'flex-start', sm: 'flex-end' }}>
+                                  <Typography color="text.secondary">
+                                    Line items: {bid.lineItems.length}
+                                  </Typography>
+                                  <Button
+                                    variant="outlined"
+                                    size="small"
+                                    onClick={() => {
+                                      setMessageContractorId(bid.contractorProfileId)
+                                      setActiveTab('messages')
+                                    }}
+                                  >
+                                    Message contractor
+                                  </Button>
+                                </Stack>
+                              </Stack>
+                              {bid.notes ? (
+                                <Typography color="text.secondary">Notes: {bid.notes}</Typography>
+                              ) : null}
+                            </Stack>
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </Stack>
+                  ) : null}
+                </Stack>
               )}
             </Stack>
             {errorMessage ? <Typography color="error">{errorMessage}</Typography> : null}
             {successMessage ? <Typography color="success.main">{successMessage}</Typography> : null}
-            <AttachmentViewer
-              attachments={attachments}
-              onDeleteAttachment={async (attachment) => {
-                if (!jobId) {
-                  return
-                }
-
-                const token = getAuthToken()
-                if (!token) {
-                  setAuthRedirect(location.pathname)
-                  navigate('/login')
-                  return
-                }
-
-                try {
-                  await deleteJobAttachment(token, jobId, attachment.id)
-                  setAttachments((current) =>
-                    current.filter((item) => item.id !== attachment.id),
-                  )
-                } catch (err) {
-                  const message = err instanceof Error ? err.message : 'Unable to delete attachment.'
-                  setErrorMessage(message)
-                }
-              }}
-            />
             <Stack spacing={1}>
               <Link component={RouterLink} to="/client-dashboard">
                 Back to dashboard

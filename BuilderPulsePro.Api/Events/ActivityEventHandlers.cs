@@ -46,6 +46,48 @@ public sealed class PersistBidAcceptedActivity(AppDbContext db) : IEventHandler<
             ct);
 }
 
+public sealed class PersistBidUpdatedActivity(AppDbContext db) : IEventHandler<BidUpdated>
+{
+    public Task HandleAsync(BidUpdated evt, CancellationToken ct)
+        => ActivityEventPersistence.PersistAsync(
+            db,
+            evt.JobId,
+            evt.BidId,
+            evt.BidderUserId,
+            evt.OccurredAt,
+            nameof(BidUpdated),
+            evt,
+            ct);
+}
+
+public sealed class PersistBidWithdrawnActivity(AppDbContext db) : IEventHandler<BidWithdrawn>
+{
+    public Task HandleAsync(BidWithdrawn evt, CancellationToken ct)
+        => ActivityEventPersistence.PersistAsync(
+            db,
+            evt.JobId,
+            evt.BidId,
+            evt.BidderUserId,
+            evt.OccurredAt,
+            nameof(BidWithdrawn),
+            evt,
+            ct);
+}
+
+public sealed class PersistBidRejectedActivity(AppDbContext db) : IEventHandler<BidRejected>
+{
+    public Task HandleAsync(BidRejected evt, CancellationToken ct)
+        => ActivityEventPersistence.PersistAsync(
+            db,
+            evt.JobId,
+            evt.BidId,
+            evt.RejectedByUserId,
+            evt.OccurredAt,
+            nameof(BidRejected),
+            evt,
+            ct);
+}
+
 public sealed class PersistJobCompletedActivity(AppDbContext db) : IEventHandler<JobCompleted>
 {
     public Task HandleAsync(JobCompleted evt, CancellationToken ct)

@@ -25,6 +25,28 @@ public record BidAccepted(
     DateTimeOffset OccurredAt
 ) : IDomainEvent;
 
+public record BidUpdated(
+    Guid BidId,
+    Guid JobId,
+    Guid BidderUserId,
+    DateTimeOffset OccurredAt
+) : IDomainEvent;
+
+public record BidWithdrawn(
+    Guid BidId,
+    Guid JobId,
+    Guid BidderUserId,
+    DateTimeOffset OccurredAt
+) : IDomainEvent;
+
+public record BidRejected(
+    Guid BidId,
+    Guid JobId,
+    Guid BidderUserId,
+    Guid RejectedByUserId,
+    DateTimeOffset OccurredAt
+) : IDomainEvent;
+
 public record JobCompleted(
     Guid JobId,
     Guid CompletedByUserId,

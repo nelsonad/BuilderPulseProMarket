@@ -30,7 +30,10 @@ public sealed class EmailOnBidPlaced(
         // Get bid info (for amount + contractor display name)
         var bid = await db.Bids.AsNoTracking()
             .Where(b => b.Id == evt.BidId)
-            .Select(b => new { b.AmountCents, b.ContractorName })
+            .Join(db.ContractorProfiles.AsNoTracking(),
+                b => b.ContractorProfileId,
+                p => p.UserId,
+                (b, p) => new { b.AmountCents, ContractorName = p.DisplayName })
             .FirstOrDefaultAsync(ct);
 
         if (bid is null) return;
@@ -50,6 +53,116 @@ public sealed class EmailOnBidPlaced(
     }
 }
 
+public sealed class EmailOnBidUpdated(
+    AppDbContext db,
+    UserManager<AppUser> userManager,
+    IEmailSender email) : IEventHandler<BidUpdated>
+{
+    public async Task HandleAsync(BidUpdated evt, CancellationToken ct)
+    {
+        var job = await db.Jobs.AsNoTracking()
+            .Where(j => j.Id == evt.JobId)
+            .Select(j => new { j.Id, j.Title, j.PostedByUserId })
+            .FirstOrDefaultAsync(ct);
+
+        if (job is null) return;
+
+        var poster = await userManager.FindByIdAsync(job.PostedByUserId.ToString());
+        var to = poster?.Email;
+        if (string.IsNullOrWhiteSpace(to)) return;
+
+        var bid = await db.Bids.AsNoTracking()
+            .Where(b => b.Id == evt.BidId)
+            .Join(db.ContractorProfiles.AsNoTracking(),
+                b => b.ContractorProfileId,
+                p => p.UserId,
+                (b, p) => new { b.AmountCents, ContractorName = p.DisplayName })
+            .FirstOrDefaultAsync(ct);
+
+        if (bid is null) return;
+
+        var subject = $"Bid updated: {job.Title}";
+        var body =
+            $"""
+            A bid was updated for your job "{job.Title}".
+
+            Contractor: {bid.ContractorName}
+            Amount: ${(bid.AmountCents / 100.0):0.00}
+
+            Review the updated bid in the app.
+            """;
+
+        await email.SendAsync(new EmailMessage(to, subject, body), ct);
+    }
+}
+
+public sealed class EmailOnBidWithdrawn(
+    AppDbContext db,
+    UserManager<AppUser> userManager,
+    IEmailSender email) : IEventHandler<BidWithdrawn>
+{
+    public async Task HandleAsync(BidWithdrawn evt, CancellationToken ct)
+    {
+        var job = await db.Jobs.AsNoTracking()
+            .Where(j => j.Id == evt.JobId)
+            .Select(j => new { j.Id, j.Title, j.PostedByUserId })
+            .FirstOrDefaultAsync(ct);
+
+        if (job is null) return;
+
+        var poster = await userManager.FindByIdAsync(job.PostedByUserId.ToString());
+        var to = poster?.Email;
+        if (string.IsNullOrWhiteSpace(to)) return;
+
+        var contractorName = await db.ContractorProfiles.AsNoTracking()
+            .Where(p => p.UserId == evt.BidderUserId)
+            .Select(p => p.DisplayName)
+            .FirstOrDefaultAsync(ct);
+
+        var subject = $"Bid withdrawn: {job.Title}";
+        var body =
+            $"""
+            A bid was withdrawn for your job "{job.Title}".
+
+            Contractor: {contractorName ?? "Contractor"}
+
+            View bids in the app.
+            """;
+
+        await email.SendAsync(new EmailMessage(to, subject, body), ct);
+    }
+}
+
+public sealed class EmailOnBidRejected(
+    AppDbContext db,
+    UserManager<AppUser> userManager,
+    IEmailSender email) : IEventHandler<BidRejected>
+{
+    public async Task HandleAsync(BidRejected evt, CancellationToken ct)
+    {
+        var job = await db.Jobs.AsNoTracking()
+            .Where(j => j.Id == evt.JobId)
+            .Select(j => new { j.Id, j.Title })
+            .FirstOrDefaultAsync(ct);
+
+        if (job is null) return;
+
+        var bidder = await userManager.FindByIdAsync(evt.BidderUserId.ToString());
+        var to = bidder?.Email;
+        if (string.IsNullOrWhiteSpace(to)) return;
+
+        var subject = $"Bid not selected: {job.Title}";
+        var body =
+            $"""
+            Your bid was not selected for the job "{job.Title}".
+
+            Thanks for submitting a bid.
+            """;
+
+        await email.SendAsync(new EmailMessage(to, subject, body), ct);
+    }
+}
+
 public sealed class EmailOnBidAccepted(
     AppDbContext db,
     UserManager<AppUser> userManager,
@@ -63,7 +176,11 @@ public sealed class EmailOnBidAccepted(
             .Join(db.Jobs.AsNoTracking(),
                 b => b.JobId,
                 j => j.Id,
-                (b, j) => new { b.BidderUserId, b.ContractorName, j.Title })
+                (b, j) => new { b.BidderUserId, b.ContractorProfileId, j.Title })
+            .Join(db.ContractorProfiles.AsNoTracking(),
+                row => row.ContractorProfileId,
+                p => p.UserId,
+                (row, p) => new { row.BidderUserId, row.Title, ContractorName = p.DisplayName })
             .FirstOrDefaultAsync(ct);
 
         if (row is null) return;

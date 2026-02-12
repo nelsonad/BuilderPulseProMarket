@@ -3,6 +3,7 @@ using System;
 using BuilderPulsePro.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using NetTopologySuite.Geometries;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
@@ -12,9 +13,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace BuilderPulsePro.Api.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260212010748_BidAttachmentParsing")]
+    partial class BidAttachmentParsing
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -178,10 +181,6 @@ namespace BuilderPulsePro.Api.Migrations
                     b.Property<long>("AmountCents")
                         .HasColumnType("bigint");
 
-                    b.Property<string>("Assumptions")
-                        .HasMaxLength(4000)
-                        .HasColumnType("character varying(4000)");
-
                     b.Property<Guid>("BidderUserId")
                         .HasColumnType("uuid");
 
@@ -208,18 +207,6 @@ namespace BuilderPulsePro.Api.Migrations
                         .HasMaxLength(4000)
                         .HasColumnType("character varying(4000)");
 
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)");
-
-                    b.Property<string>("Terms")
-                        .HasMaxLength(4000)
-                        .HasColumnType("character varying(4000)");
-
-                    b.Property<DateTimeOffset?>("ValidUntil")
-                        .HasColumnType("timestamp with time zone");
-
                     b.HasKey("Id");
 
                     b.HasIndex("BidderUserId");
@@ -227,8 +214,6 @@ namespace BuilderPulsePro.Api.Migrations
                     b.HasIndex("ContractorProfileId");
 
                     b.HasIndex("JobId");
-
-                    b.HasIndex("Status");
 
                     b.HasIndex("JobId", "BidderUserId")
                         .IsUnique();

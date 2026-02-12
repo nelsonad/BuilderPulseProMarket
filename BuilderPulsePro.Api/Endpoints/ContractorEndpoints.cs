@@ -2,6 +2,7 @@
 using BuilderPulsePro.Api.Contracts;
 using BuilderPulsePro.Api.Data;
 using BuilderPulsePro.Api.Domain;
+using BuilderPulsePro.Api.Events;
 using BuilderPulsePro.Api.Geo;
 using Microsoft.EntityFrameworkCore;
 using NetTopologySuite.Geometries;
@@ -45,6 +46,7 @@ public static class ContractorEndpoints
         AppDbContext db,
         ClaimsPrincipal user,
         Guid bidId,
+        IEventBus bus,
         string? status = null,
         bool? accepted = null,
         int take = 50)
@@ -62,14 +64,20 @@ public static class ContractorEndpoints
 
         if (row is null) return Results.NotFound("Bid not found.");
 
-        if (row.Bid.IsAccepted)
+        if (row.Bid.Status == BidStatus.Accepted)
             return Results.BadRequest("Accepted bids cannot be withdrawn.");
 
         if (row.JobStatus != JobStatus.Open)
             return Results.BadRequest("Bids can only be withdrawn while the job is open.");
 
-        db.Bids.Remove(row.Bid);
+        if (row.Bid.Status == BidStatus.Withdrawn)
+            return Results.BadRequest("Bid is already withdrawn.");
+
+        row.Bid.Status = BidStatus.Withdrawn;
+        row.Bid.IsAccepted = false;
         await db.SaveChangesAsync();
+
+        await bus.PublishAsync(new BidWithdrawn(row.Bid.Id, row.Bid.JobId, row.Bid.BidderUserId, DateTimeOffset.UtcNow));
 
         // Return updated list (same as GET)
         var result = await LoadMyBids(db, userId, status, accepted, take);
@@ -99,6 +107,7 @@ public static class ContractorEndpoints
             DurationDays: r.DurationDays,
             Notes: r.Notes,
             IsAccepted: r.IsAccepted,
+            Status: r.Status.ToString(),
             BidCreatedAt: r.BidCreatedAt,
             Job: new MyBidJobInfo(
                 JobId: r.JobId,
@@ -139,6 +148,7 @@ public static class ContractorEndpoints
                 DurationDays = b.DurationDays,
                 Notes = b.Notes,
                 IsAccepted = b.IsAccepted,
+                Status = b.Status,
                 BidCreatedAt = b.CreatedAt,
 
                 Title = j.Title,
@@ -465,6 +475,7 @@ public static class ContractorEndpoints
         public int? DurationDays { get; set; }
         public string Notes { get; set; } = "";
         public bool IsAccepted { get; set; }
+        public BidStatus Status { get; set; }
         public DateTimeOffset BidCreatedAt { get; set; }
 
         public string Title { get; set; } = "";

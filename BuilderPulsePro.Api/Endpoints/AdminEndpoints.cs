@@ -2,6 +2,7 @@ using BuilderPulsePro.Api.Auth;
 using BuilderPulsePro.Api.Contracts;
 using BuilderPulsePro.Api.Data;
 using BuilderPulsePro.Api.Domain;
+using BuilderPulsePro.Api.Events;
 using BuilderPulsePro.Api.Notifications;
 using System.Security.Claims;
 using Microsoft.EntityFrameworkCore;
@@ -19,6 +20,7 @@ public static class AdminEndpoints
 
         group.MapPost("/notifications/job-digest/run", RunJobDigest);
         group.MapGet("/metrics", GetMetrics);
+        group.MapGet("/events/bids", ListBidEvents);
         group.MapGet("/reports/messages", ListMessageReports);
         group.MapPost("/reports/messages/{reportId:guid}/resolve", ResolveMessageReport);
         group.MapPost("/users/{userId:guid}/promote", PromoteUser);
@@ -60,6 +62,44 @@ public static class AdminEndpoints
             reports,
             jobsByStatus,
             bidsByStatus));
+    }
+
+    private static async Task<IResult> ListBidEvents(
+        AppDbContext db,
+        string? type = null,
+        int take = 200)
+    {
+        take = Math.Clamp(take, 1, 500);
+
+        var bidEventTypes = new[]
+        {
+            nameof(BidPlaced),
+            nameof(BidAccepted),
+            nameof(BidUpdated),
+            nameof(BidWithdrawn),
+            nameof(BidRejected)
+        };
+
+        var query = db.ActivityEvents.AsNoTracking()
+            .Where(e => bidEventTypes.Contains(e.Type));
+
+        if (!string.IsNullOrWhiteSpace(type))
+            query = query.Where(e => e.Type == type.Trim());
+
+        var rows = await query
+            .OrderByDescending(e => e.OccurredAt)
+            .Take(take)
+            .Select(e => new ActivityEventResponse(
+                e.Id,
+                e.Type,
+                e.JobId,
+                e.BidId,
+                e.ActorUserId,
+                e.OccurredAt,
+                e.PayloadJson))
+            .ToListAsync();
+
+        return Results.Ok(rows);
     }
 
     private static async Task<IResult> ListMessageReports(

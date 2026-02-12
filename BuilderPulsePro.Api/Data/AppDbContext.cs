@@ -15,6 +15,12 @@ public class AppDbContext : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>
     public DbSet<Contractor> Contractors => Set<Contractor>();
     public DbSet<ContractorProfile> ContractorProfiles => Set<ContractorProfile>();
     public DbSet<Bid> Bids => Set<Bid>();
+    public DbSet<BidLineItem> BidLineItems => Set<BidLineItem>();
+    public DbSet<BidVariant> BidVariants => Set<BidVariant>();
+    public DbSet<BidVariantLineItem> BidVariantLineItems => Set<BidVariantLineItem>();
+    public DbSet<BidRevision> BidRevisions => Set<BidRevision>();
+    public DbSet<BidAttachmentParseJob> BidAttachmentParseJobs => Set<BidAttachmentParseJob>();
+    public DbSet<BidAttachment> BidAttachments => Set<BidAttachment>();
     public DbSet<ActivityEvent> ActivityEvents => Set<ActivityEvent>();
     public DbSet<Conversation> Conversations => Set<Conversation>();
     public DbSet<Message> Messages => Set<Message>();
@@ -86,6 +92,23 @@ public class AppDbContext : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
+        modelBuilder.Entity<BidAttachment>(b =>
+        {
+            b.HasKey(x => new { x.BidId, x.AttachmentId });
+            b.HasIndex(x => x.BidId);
+            b.HasIndex(x => x.AttachmentId);
+
+            b.HasOne<Bid>()
+                .WithMany()
+                .HasForeignKey(x => x.BidId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            b.HasOne(x => x.Attachment)
+                .WithMany()
+                .HasForeignKey(x => x.AttachmentId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
         modelBuilder.Entity<Job>()
             .HasIndex(x => x.Status);
 
@@ -93,13 +116,20 @@ public class AppDbContext : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>
         {
             b.HasKey(x => x.Id);
 
-            b.Property(x => x.ContractorName).HasMaxLength(200).IsRequired();
+            b.Property(x => x.ContractorProfileId).IsRequired();
             b.Property(x => x.AmountCents).IsRequired();
             b.Property(x => x.Notes).HasMaxLength(4000);
+            b.Property(x => x.Terms).HasMaxLength(4000);
+            b.Property(x => x.Assumptions).HasMaxLength(4000);
+            b.Property(x => x.Status).HasConversion<string>().HasMaxLength(20).IsRequired();
 
             b.HasIndex(x => x.JobId);
 
             b.HasIndex(x => x.BidderUserId);
+
+            b.HasIndex(x => x.ContractorProfileId);
+
+            b.HasIndex(x => x.Status);
 
             // Enforce one bid per user per job
             b.HasIndex(x => new { x.JobId, x.BidderUserId }).IsUnique();
@@ -107,6 +137,87 @@ public class AppDbContext : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>
             b.HasOne(x => x.Job)
                 .WithMany()
                 .HasForeignKey(x => x.JobId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<BidLineItem>(b =>
+        {
+            b.HasKey(x => x.Id);
+            b.Property(x => x.Description).HasMaxLength(500).IsRequired();
+            b.Property(x => x.Quantity).IsRequired();
+            b.Property(x => x.UnitPriceCents).IsRequired();
+            b.Property(x => x.SortOrder).IsRequired();
+
+            b.HasIndex(x => x.BidId);
+            b.HasIndex(x => new { x.BidId, x.SortOrder });
+
+            b.HasOne(x => x.Bid)
+                .WithMany(b => b.LineItems)
+                .HasForeignKey(x => x.BidId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<BidVariant>(b =>
+        {
+            b.HasKey(x => x.Id);
+            b.Property(x => x.Name).HasMaxLength(200).IsRequired();
+            b.Property(x => x.Notes).HasMaxLength(2000);
+            b.Property(x => x.AmountCents).IsRequired();
+            b.Property(x => x.SortOrder).IsRequired();
+
+            b.HasIndex(x => x.BidId);
+            b.HasIndex(x => new { x.BidId, x.SortOrder });
+
+            b.HasOne(x => x.Bid)
+                .WithMany()
+                .HasForeignKey(x => x.BidId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<BidAttachmentParseJob>(b =>
+        {
+            b.HasKey(x => x.Id);
+            b.Property(x => x.Status).IsRequired();
+            b.Property(x => x.CreatedAt).IsRequired();
+            b.Property(x => x.UpdatedAt).IsRequired();
+            b.Property(x => x.ErrorMessage).HasMaxLength(2000);
+
+            b.HasIndex(x => x.BidId);
+            b.HasIndex(x => x.AttachmentId);
+            b.HasIndex(x => new { x.BidId, x.AttachmentId });
+        });
+
+        modelBuilder.Entity<BidVariantLineItem>(b =>
+        {
+            b.HasKey(x => x.Id);
+            b.Property(x => x.Description).HasMaxLength(500).IsRequired();
+            b.Property(x => x.Quantity).IsRequired();
+            b.Property(x => x.UnitPriceCents).IsRequired();
+            b.Property(x => x.SortOrder).IsRequired();
+
+            b.HasIndex(x => x.BidVariantId);
+            b.HasIndex(x => new { x.BidVariantId, x.SortOrder });
+
+            b.HasOne(x => x.BidVariant)
+                .WithMany(v => v.LineItems)
+                .HasForeignKey(x => x.BidVariantId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<BidRevision>(b =>
+        {
+            b.HasKey(x => x.Id);
+            b.Property(x => x.RevisionNumber).IsRequired();
+            b.Property(x => x.CreatedByUserId).IsRequired();
+            b.Property(x => x.CreatedAt).IsRequired();
+            b.Property(x => x.SnapshotJson).IsRequired();
+
+            b.HasIndex(x => x.BidId);
+            b.HasIndex(x => new { x.BidId, x.RevisionNumber });
+
+            b.HasOne(x => x.Bid)
+                .WithMany()
+                .HasForeignKey(x => x.BidId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
