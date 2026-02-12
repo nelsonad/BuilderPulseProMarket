@@ -5,19 +5,18 @@ import AttachmentViewer from '../components/AttachmentViewer';
 import {styles} from '../styles';
 import {Job, JobAttachment} from '../types';
 
-type JobDetailsScreenProps = {
+type ContractorJobDetailsScreenProps = {
   job: Job | null;
   attachments: JobAttachment[];
   onBack: () => void;
-  onPostJob: () => void;
 };
 
-const JobDetailsScreen = ({
+const ContractorJobDetailsScreen = ({
   job,
   attachments,
   onBack,
-  onPostJob,
-}: JobDetailsScreenProps) => {
+}: ContractorJobDetailsScreenProps) => (
+}: ContractorJobDetailsScreenProps) => {
   const [activeTab, setActiveTab] = useState('details');
 
   const formattedCreatedAt = job?.createdAt
@@ -74,13 +73,10 @@ const JobDetailsScreen = ({
           <Button mode="text" onPress={onBack}>
             Back to dashboard
           </Button>
-          <Button mode="text" onPress={onPostJob}>
-            Post another job
-          </Button>
         </View>
       </Card.Content>
     </Card>
   );
 };
 
-export default JobDetailsScreen;
+export default ContractorJobDetailsScreen;

@@ -13,22 +13,7 @@ public sealed class EmailOnMessagePosted(
 {
     public async Task HandleAsync(MessagePosted evt, CancellationToken ct)
     {
-        var convo = await db.Conversations.AsNoTracking()
-            .Where(c => c.Id == evt.ConversationId && c.JobId == evt.JobId)
-            .Select(c => new { c.PosterUserId, c.ContractorUserId })
-            .FirstOrDefaultAsync(ct);
-
-        if (convo is null) return;
-
-        Guid recipientUserId;
-        if (evt.SenderUserId == convo.PosterUserId)
-            recipientUserId = convo.ContractorUserId;
-        else if (evt.SenderUserId == convo.ContractorUserId)
-            recipientUserId = convo.PosterUserId;
-        else
-            return;
-
-        var recipient = await userManager.FindByIdAsync(recipientUserId.ToString());
+        var recipient = await userManager.FindByIdAsync(evt.RecipientUserId.ToString());
         var to = recipient?.Email;
         if (string.IsNullOrWhiteSpace(to)) return;
 

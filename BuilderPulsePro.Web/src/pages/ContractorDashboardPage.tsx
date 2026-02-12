@@ -130,7 +130,7 @@ function ContractorDashboardPage() {
                             {Math.round(job.distanceMeters)} m away
                           </Typography>
                         </div>
-                        <Button component={RouterLink} to={`/jobs/${job.id}`}>
+                        <Button component={RouterLink} to={`/contractor/job/view/${job.id}`}>
                           View details
                         </Button>
                       </CardContent>

@@ -18,6 +18,7 @@ public class AppDbContext : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>
     public DbSet<ActivityEvent> ActivityEvents => Set<ActivityEvent>();
     public DbSet<Conversation> Conversations => Set<Conversation>();
     public DbSet<Message> Messages => Set<Message>();
+    public DbSet<MessageAttachment> MessageAttachments => Set<MessageAttachment>();
     public DbSet<Review> Reviews => Set<Review>();
     public DbSet<MessageReport> MessageReports => Set<MessageReport>();
     public DbSet<ContractorJobNotification> ContractorJobNotifications => Set<ContractorJobNotification>();
@@ -146,9 +147,9 @@ public class AppDbContext : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>
             b.HasKey(x => x.Id);
 
             b.Property(x => x.CreatedAt).IsRequired();
-            b.HasIndex(x => x.JobId).IsUnique();
-            b.HasIndex(x => x.PosterUserId);
-            b.HasIndex(x => x.ContractorUserId);
+            b.HasIndex(x => new { x.JobId, x.ContractorProfileId }).IsUnique();
+            b.HasIndex(x => x.ClientUserId);
+            b.HasIndex(x => x.ContractorProfileId);
         });
 
         modelBuilder.Entity<Message>(b =>
@@ -160,6 +161,27 @@ public class AppDbContext : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>
 
             b.HasIndex(x => x.ConversationId);
             b.HasIndex(x => x.SenderUserId);
+            b.HasIndex(x => x.RecipientUserId);
+            b.HasIndex(x => x.ReadAt);
+            b.HasIndex(x => x.ClientUserId);
+            b.HasIndex(x => x.ContractorProfileId);
+        });
+
+        modelBuilder.Entity<MessageAttachment>(b =>
+        {
+            b.HasKey(x => new { x.MessageId, x.AttachmentId });
+            b.HasIndex(x => x.MessageId);
+            b.HasIndex(x => x.AttachmentId);
+
+            b.HasOne<Message>()
+                .WithMany()
+                .HasForeignKey(x => x.MessageId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            b.HasOne(x => x.Attachment)
+                .WithMany()
+                .HasForeignKey(x => x.AttachmentId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<MessageReport>(b =>

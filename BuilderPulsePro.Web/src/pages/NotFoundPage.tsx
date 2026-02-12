@@ -3,7 +3,7 @@ import { Card, CardContent, Container, Link, Stack, Typography } from '@mui/mate
 
 function NotFoundPage() {
   return (
-    <Container maxWidth="sm" sx={{ py: 6 }}>
+    <Container maxWidth="md" sx={{ py: 6 }}>
       <Card elevation={3}>
         <CardContent>
           <Stack spacing={2}>

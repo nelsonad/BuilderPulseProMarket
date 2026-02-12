@@ -78,7 +78,7 @@ function SignUpPage() {
   }
 
   return (
-    <Container maxWidth="sm" sx={{ py: 6 }}>
+    <Container maxWidth="md" sx={{ py: 6 }}>
       <Card elevation={3}>
         <CardContent>
           <Stack spacing={3}>

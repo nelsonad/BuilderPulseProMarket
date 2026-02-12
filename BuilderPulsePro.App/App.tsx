@@ -12,6 +12,7 @@
 
 import React, {useEffect, useMemo, useState} from 'react';
 import {SafeAreaView, ScrollView, View} from 'react-native';
+import DocumentPicker from 'react-native-document-picker';
 import {
   Appbar,
   Menu,
@@ -23,6 +24,7 @@ import ChooseModeScreen from './src/screens/ChooseModeScreen';
 import ClientDashboardScreen from './src/screens/ClientDashboardScreen';
 import ConfirmEmailScreen from './src/screens/ConfirmEmailScreen';
 import ContractorDashboardScreen from './src/screens/ContractorDashboardScreen';
+import ContractorJobDetailsScreen from './src/screens/ContractorJobDetailsScreen';
 import ContractorProfileScreen, {
   tradeOptions,
 } from './src/screens/ContractorProfileScreen';
@@ -42,16 +44,23 @@ import {
   createJob,
   getJobAttachments,
   getMyJobs,
+  uploadJobAttachments,
 } from './src/services/jobsService';
 import {getUserMode, setUserMode} from './src/services/storageService';
 import {styles} from './src/styles';
 import {
   ContractorProfile,
   Job,
+  JobAttachment,
+  PendingAttachment,
   RecommendedJob,
   Screen,
   UserMode,
 } from './src/types';
+import {
+  allowedAttachmentExtensionsDisplay,
+  isAllowedAttachmentFileName,
+} from './src/utils/attachments';
 import {isValidEmail} from './src/utils/validation';
 import {lookupZip} from './src/utils/zipLookup';
 
@@ -114,6 +123,9 @@ const App = () => {
   const [postZip, setPostZip] = useState('');
   const [postMessage, setPostMessage] = useState('');
   const [postError, setPostError] = useState('');
+  const [postAttachments, setPostAttachments] = useState<PendingAttachment[]>(
+    [],
+  );
 
   useEffect(() => {
     const loadMode = async () => {
@@ -126,6 +138,48 @@ const App = () => {
     };
     loadMode();
   }, []);
+
+  const handlePickAttachments = async () => {
+    setPostError('');
+
+    try {
+      const results = await DocumentPicker.pick({
+        allowMultiSelection: true,
+        type: [DocumentPicker.types.allFiles],
+        copyTo: 'cachesDirectory',
+      });
+
+      const allowed = results
+        .map(result => ({
+          uri: result.fileCopyUri ?? result.uri,
+          name: result.name,
+          type: result.type ?? 'application/octet-stream',
+          size: result.size ?? null,
+        }))
+        .filter(result => isAllowedAttachmentFileName(result.name));
+
+      const skipped = results.length - allowed.length;
+      if (skipped > 0) {
+        setPostError(
+          `Some files were skipped. Allowed types: ${allowedAttachmentExtensionsDisplay}.`,
+        );
+      }
+
+      if (allowed.length > 0) {
+        setPostAttachments(current => [...current, ...allowed]);
+      }
+    } catch (error) {
+      if (DocumentPicker.isCancel(error)) {
+        return;
+      }
+
+      setPostError('Unable to pick attachments.');
+    }
+  };
+
+  const handleClearAttachments = () => {
+    setPostAttachments([]);
+  };
 
   const handleSignOut = () => {
     setAuthToken('');
@@ -151,6 +205,7 @@ const App = () => {
       (target === 'clientDashboard' ||
         target === 'contractorDashboard' ||
         target === 'contractorProfile' ||
+        target === 'contractorJobDetails' ||
         target === 'postJob' ||
         target === 'jobDetails')
     ) {
@@ -218,7 +273,10 @@ const App = () => {
   }, [screen, authToken]);
 
   useEffect(() => {
-    if (screen !== 'jobDetails' || !selectedJobId) {
+    if (
+      (screen !== 'jobDetails' && screen !== 'contractorJobDetails') ||
+      !selectedJobId
+    ) {
       setJobAttachments([]);
       return;
     }
@@ -607,7 +665,7 @@ const App = () => {
     }
 
     try {
-      await createJob(authToken, {
+      const job = await createJob(authToken, {
         title: postTitle.trim(),
         trade: postTrade.trim(),
         description: postDescription.trim() || null,
@@ -618,6 +676,10 @@ const App = () => {
         lng: 0,
       });
 
+      if (postAttachments.length > 0) {
+        await uploadJobAttachments(authToken, job.id, postAttachments);
+      }
+
       setPostMessage('Job submitted.');
       setPostTitle('');
       setPostTrade('');
@@ -625,6 +687,7 @@ const App = () => {
       setPostCity('');
       setPostState('');
       setPostZip('');
+      setPostAttachments([]);
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Unable to post job.';
@@ -723,7 +786,7 @@ const App = () => {
             onEditProfile={() => navigateTo('contractorProfile')}
             onViewJob={jobId => {
               setSelectedJobId(jobId);
-              navigateTo('jobDetails');
+              navigateTo('contractorJobDetails');
             }}
           />
         );
@@ -763,6 +826,14 @@ const App = () => {
             onPostJob={() => navigateTo('postJob')}
           />
         );
+      case 'contractorJobDetails':
+        return (
+          <ContractorJobDetailsScreen
+            job={selectedJob}
+            attachments={jobAttachments}
+            onBack={() => navigateTo('contractorDashboard')}
+          />
+        );
       case 'postJob':
       default:
         return (
@@ -775,12 +846,15 @@ const App = () => {
             zip={postZip}
             message={postMessage}
             error={postError}
+            attachments={postAttachments}
             onTitleChange={setPostTitle}
             onTradeChange={setPostTrade}
             onDescriptionChange={setPostDescription}
             onCityChange={setPostCity}
             onStateChange={setPostState}
             onZipChange={setPostZip}
+            onAddAttachments={handlePickAttachments}
+            onClearAttachments={handleClearAttachments}
             onSubmit={handlePostJob}
             onBackToDashboard={() => navigateTo('clientDashboard')}
           />

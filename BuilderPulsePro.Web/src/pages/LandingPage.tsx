@@ -3,7 +3,7 @@ import { Box, Button, Container, Link, Stack, Typography } from '@mui/material'
 
 function LandingPage() {
   return (
-    <Container maxWidth="md" sx={{ py: 10 }}>
+    <Container maxWidth="md" sx={{ py: 6 }}>
       <Box sx={{ textAlign: 'center' }}>
         <Typography variant="overline" color="primary">
           BuilderPulsePro

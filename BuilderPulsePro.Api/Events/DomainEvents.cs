@@ -32,8 +32,10 @@ public record JobCompleted(
 ) : IDomainEvent;
 
 public record MessagePosted(
+    Guid MessageId,
     Guid ConversationId,
     Guid JobId,
     Guid SenderUserId,
+    Guid RecipientUserId,
     DateTimeOffset OccurredAt
 ) : IDomainEvent;

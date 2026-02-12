@@ -8,10 +8,13 @@ import {
   MenuItem,
   Link,
   Stack,
+  Tabs,
+  Tab,
   TextField,
   Typography,
 } from '@mui/material'
 import AttachmentViewer from '../components/AttachmentViewer'
+import JobMessagesPanel from '../components/JobMessagesPanel'
 import {
   getJob,
   getJobAttachments,
@@ -39,6 +42,18 @@ function JobDetailsPage() {
   const [state, setState] = useState('')
   const [zip, setZip] = useState('')
   const [newAttachments, setNewAttachments] = useState<File[]>([])
+  const [activeTab, setActiveTab] = useState('details')
+
+  const formattedCreatedAt = job?.createdAt
+    ? new Date(job.createdAt).toLocaleString('en-US', {
+        month: 'long',
+        day: 'numeric',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+      })
+    : ''
 
   useEffect(() => {
     const token = getAuthToken()
@@ -151,7 +166,7 @@ function JobDetailsPage() {
 
 
   return (
-    <Container maxWidth="sm" sx={{ py: 6 }}>
+    <Container maxWidth="md" sx={{ py: 6 }}>
       <Card elevation={3}>
         <CardContent>
           <Stack spacing={2}>
@@ -161,82 +176,127 @@ function JobDetailsPage() {
             <Typography variant="h4" fontWeight={700} gutterBottom>
               {job?.title ?? `Job ${jobId}`}
             </Typography>
-            {job ? (
-              <Typography color="text.secondary">
-                {job.status}
-              </Typography>
-            ) : null}
             <Stack spacing={2}>
-              <TextField
-                label="Title"
-                value={title}
-                onChange={(event) => setTitle(event.target.value)}
-                fullWidth
-              />
-              <TextField
-                label="Trade"
-                value={trade}
-                onChange={(event) => setTrade(event.target.value)}
-                select
-                fullWidth
+              <Tabs
+                value={activeTab}
+                onChange={(_, value) => setActiveTab(value)}
+                textColor="primary"
+                indicatorColor="primary"
+                sx={{
+                  '& .MuiTabs-flexContainer': { gap: 1 },
+                  '& .MuiTab-root': {
+                    minHeight: 36,
+                    paddingX: 2,
+                    borderRadius: 999,
+                    textTransform: 'none',
+                    fontWeight: 600,
+                  },
+                  '& .MuiTabs-indicator': { height: 0 },
+                  '& .MuiTab-root.Mui-selected': {
+                    backgroundColor: 'primary.main',
+                    color: 'primary.contrastText',
+                  },
+                }}
               >
-                <MenuItem value="" disabled>
-                  Select a trade
-                </MenuItem>
-                {tradeOptions.map((option) => (
-                  <MenuItem key={option} value={option}>
-                    {option}
-                  </MenuItem>
-                ))}
-              </TextField>
-              <TextField
-                label="Description"
-                value={description}
-                onChange={(event) => setDescription(event.target.value)}
-                fullWidth
-                multiline
-                minRows={3}
-              />
-              <TextField
-                label="City"
-                value={city}
-                onChange={(event) => setCity(event.target.value)}
-                fullWidth
-              />
-              <TextField
-                label="State"
-                value={state}
-                onChange={(event) => setState(event.target.value)}
-                fullWidth
-              />
-              <TextField
-                label="Zip code"
-                value={zip}
-                onChange={(event) => setZip(event.target.value.replace(/\D/g, '').slice(0, 5))}
-                inputProps={{ inputMode: 'numeric', pattern: '[0-9]*', maxLength: 5 }}
-                fullWidth
-              />
-              <Button variant="outlined" component="label">
-                Add attachments
-                <input
-                  hidden
-                  type="file"
-                  multiple
-                  onChange={(event) =>
-                    setNewAttachments(Array.from(event.target.files ?? []))
-                  }
-                />
-              </Button>
-              {newAttachments.length > 0 ? (
-                <Typography color="text.secondary" variant="body2">
-                  {newAttachments.length} attachment{newAttachments.length > 1 ? 's' : ''} selected
+                <Tab label="Details" value="details" />
+                <Tab label="Messages" value="messages" />
+                <Tab label="Bids" value="bids" />
+              </Tabs>
+              {activeTab === 'details' ? (
+                <Stack spacing={2}>
+                  <TextField
+                    label="Title"
+                    value={title}
+                    onChange={(event) => setTitle(event.target.value)}
+                    fullWidth
+                  />
+                  <TextField
+                    label="Trade"
+                    value={trade}
+                    onChange={(event) => setTrade(event.target.value)}
+                    select
+                    fullWidth
+                  >
+                    <MenuItem value="" disabled>
+                      Select a trade
+                    </MenuItem>
+                    {tradeOptions.map((option) => (
+                      <MenuItem key={option} value={option}>
+                        {option}
+                      </MenuItem>
+                    ))}
+                  </TextField>
+                  <TextField
+                    label="Description"
+                    value={description}
+                    onChange={(event) => setDescription(event.target.value)}
+                    fullWidth
+                    multiline
+                    minRows={3}
+                  />
+                  {formattedCreatedAt ? (
+                    <TextField
+                      label="Created"
+                      value={formattedCreatedAt}
+                      fullWidth
+                      InputProps={{ readOnly: true }}
+                    />
+                  ) : null}
+                  <TextField
+                    label="City"
+                    value={city}
+                    onChange={(event) => setCity(event.target.value)}
+                    fullWidth
+                  />
+                  <TextField
+                    label="State"
+                    value={state}
+                    onChange={(event) => setState(event.target.value)}
+                    fullWidth
+                  />
+                  <TextField
+                    label="Zip code"
+                    value={zip}
+                    onChange={(event) => setZip(event.target.value.replace(/\D/g, '').slice(0, 5))}
+                    inputProps={{ inputMode: 'numeric', pattern: '[0-9]*', maxLength: 5 }}
+                    fullWidth
+                  />
+                  <Button variant="outlined" component="label">
+                    Add attachments
+                    <input
+                      hidden
+                      type="file"
+                      multiple
+                      accept=".jpg,.jpeg,.png,.gif,.webp,.bmp,.pdf,.docx,.xlsx,.pptx,.txt,.rtf,.csv,.odt,.ods,.odp"
+                      onChange={(event) =>
+                        setNewAttachments(Array.from(event.target.files ?? []))
+                      }
+                    />
+                  </Button>
+                  {newAttachments.length > 0 ? (
+                    <Typography color="text.secondary" variant="body2">
+                      {newAttachments.length} attachment{newAttachments.length > 1 ? 's' : ''} selected
+                    </Typography>
+                  ) : null}
+                  <Stack direction="row" spacing={2}>
+                    <Button variant="contained" onClick={handleSave}>
+                      Save changes
+                    </Button>
+                  </Stack>
+                </Stack>
+              ) : activeTab === 'messages' ? (
+                jobId ? (
+                  <JobMessagesPanel jobId={jobId} mode="client" />
+                ) : (
+                  <Typography color="text.secondary">
+                    Select a job to view messages.
+                  </Typography>
+                )
+              ) : (
+                <Typography color="text.secondary">
+                  Bids will appear here once available.
                 </Typography>
-              ) : null}
-              <Stack direction="row" spacing={2}>
-                <Button variant="contained" onClick={handleSave}>
-                  Save changes
-                </Button>
-              </Stack>
+              )}
             </Stack>
             {errorMessage ? <Typography color="error">{errorMessage}</Typography> : null}
             {successMessage ? <Typography color="success.main">{successMessage}</Typography> : null}

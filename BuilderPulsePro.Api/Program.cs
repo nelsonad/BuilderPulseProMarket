@@ -6,6 +6,7 @@ using BuilderPulsePro.Api.Domain;
 using BuilderPulsePro.Api.Endpoints;
 using BuilderPulsePro.Api.Events;
 using BuilderPulsePro.Api.Geo;
+using BuilderPulsePro.Api.Hubs;
 using BuilderPulsePro.Api.Notifications;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
@@ -67,6 +68,20 @@ var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey));
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                var accessToken = context.Request.Query["access_token"];
+                var path = context.HttpContext.Request.Path;
+
+                if (!string.IsNullOrWhiteSpace(accessToken) && path.StartsWithSegments("/hubs/messages"))
+                    context.Token = accessToken;
+
+                return Task.CompletedTask;
+            }
+        };
+
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidIssuer = jwtIssuer,
@@ -81,6 +96,7 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     });
 
 builder.Services.AddAuthorization();
+builder.Services.AddSignalR();
 
 builder.Services.AddCors(options =>
 {
@@ -88,7 +104,8 @@ builder.Services.AddCors(options =>
     {
         policy.WithOrigins("http://localhost:5173", "https://localhost:5173")
             .AllowAnyHeader()
-            .AllowAnyMethod();
+            .AllowAnyMethod()
+            .AllowCredentials();
     });
 });
 
@@ -182,5 +199,7 @@ app.MapJobEndpoints();
 app.MapBidEndpoints();
 app.MapContractorEndpoints();
 app.MapAdminEndpoints();
+app.MapMessagingEndpoints();
+app.MapHub<MessagingHub>("/hubs/messages");
 
 app.Run();

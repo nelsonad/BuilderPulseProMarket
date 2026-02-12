@@ -4,6 +4,7 @@ import AppHeader from './components/AppHeader'
 import ChooseModePage from './pages/ChooseModePage'
 import ClientDashboardPage from './pages/ClientDashboardPage'
 import ContractorDashboardPage from './pages/ContractorDashboardPage'
+import ContractorJobDetailsPage from './pages/ContractorJobDetailsPage'
 import ContractorProfilePage from './pages/ContractorProfilePage'
 import ConfirmEmailPage from './pages/ConfirmEmailPage'
 import JobDetailsPage from './pages/JobDetailsPage'
@@ -39,6 +40,7 @@ function App() {
               <Route path="/client-dashboard" element={<ClientDashboardPage />} />
               <Route path="/contractor-dashboard" element={<ContractorDashboardPage />} />
               <Route path="/contractor/profile" element={<ContractorProfilePage />} />
+              <Route path="/contractor/job/view/:jobId" element={<ContractorJobDetailsPage />} />
               <Route path="/jobs/post" element={<PostJobPage />} />
               <Route path="/jobs/:jobId" element={<JobDetailsPage />} />
               <Route path="*" element={<NotFoundPage />} />

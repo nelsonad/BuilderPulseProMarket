@@ -7,6 +7,7 @@ export type Screen =
   | 'clientDashboard'
   | 'contractorDashboard'
   | 'contractorProfile'
+  | 'contractorJobDetails'
   | 'jobDetails'
   | 'postJob';
 
@@ -33,6 +34,13 @@ export type JobAttachment = {
   sizeBytes: number;
   url?: string | null;
   createdAt: string;
+};
+
+export type PendingAttachment = {
+  uri: string;
+  name: string;
+  type: string;
+  size?: number | null;
 };
 
 export type ContractorProfile = {

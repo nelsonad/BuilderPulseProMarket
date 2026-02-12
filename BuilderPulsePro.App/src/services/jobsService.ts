@@ -1,4 +1,4 @@
-import {Job, JobAttachment} from '../types';
+import {Job, JobAttachment, PendingAttachment} from '../types';
 import {requestJson} from './apiClient';
 
 type CreateJobRequest = {
@@ -31,3 +31,29 @@ export const createJob = async (token: string, payload: CreateJobRequest) =>
 
 export const getJobAttachments = async (jobId: string) =>
   requestJson<JobAttachment[]>(`/jobs/${jobId}/attachments`);
+
+export const uploadJobAttachments = async (
+  token: string,
+  jobId: string,
+  files: PendingAttachment[],
+) => {
+  const formData = new FormData();
+  files.forEach(file =>
+    formData.append(
+      'files',
+      {
+        uri: file.uri,
+        name: file.name,
+        type: file.type || 'application/octet-stream',
+      } as unknown as Blob,
+    ),
+  );
+
+  return requestJson<JobAttachment[]>(`/jobs/${jobId}/attachments`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    body: formData,
+  });
+};

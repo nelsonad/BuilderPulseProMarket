@@ -7,6 +7,9 @@ export type Job = {
   description?: string | null
   status: string
   createdAt: string
+  city?: string | null
+  state?: string | null
+  zip?: string | null
   lat: number
   lng: number
   acceptedBidId?: string | null

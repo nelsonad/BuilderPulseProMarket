@@ -5,22 +5,15 @@ import {apiBaseUrl} from '../constants';
 import {JobAttachment} from '../types';
 import {styles} from '../styles';
 import {WebView} from 'react-native-webview';
+import {
+  isAllowedAttachmentFileName,
+  isPreviewableAttachmentFileName,
+} from '../utils/attachments';
 
 type AttachmentViewerProps = {
   attachments: JobAttachment[];
   emptyMessage?: string;
 };
-
-const previewableExtensions = new Set([
-  'png',
-  'jpg',
-  'jpeg',
-  'gif',
-  'webp',
-  'bmp',
-  'svg',
-  'pdf',
-]);
 
 const resolveAttachmentUrl = (attachment: JobAttachment) => {
   if (!attachment.url) {
@@ -51,6 +44,14 @@ const AttachmentViewer = ({
   const [selectedAttachment, setSelectedAttachment] =
     useState<JobAttachment | null>(null);
 
+  const allowedAttachments = useMemo(
+    () =>
+      attachments.filter(attachment =>
+        isAllowedAttachmentFileName(attachment.fileName),
+      ),
+    [attachments],
+  );
+
   const resolvedAttachmentUrl = useMemo(() => {
     if (!selectedAttachment) {
       return '';
@@ -59,13 +60,12 @@ const AttachmentViewer = ({
     return resolveAttachmentUrl(selectedAttachment);
   }, [selectedAttachment]);
 
-  const isPreviewable = (attachment: JobAttachment) => {
-    const ext = attachment.fileName.split('.').pop()?.toLowerCase() ?? '';
-    return previewableExtensions.has(ext);
-  };
-
   const handleAttachmentPress = async (attachment: JobAttachment) => {
-    if (isPreviewable(attachment)) {
+    if (!isAllowedAttachmentFileName(attachment.fileName)) {
+      return;
+    }
+
+    if (isPreviewableAttachmentFileName(attachment.fileName)) {
       setSelectedAttachment(attachment);
       return;
     }
@@ -80,10 +80,10 @@ const AttachmentViewer = ({
 
   return (
     <View style={{marginTop: 16}}>
-      {attachments.length > 0 ? (
+      {allowedAttachments.length > 0 ? (
         <View>
           <Text style={styles.label}>Attachments</Text>
-          {attachments.map(attachment => (
+          {allowedAttachments.map(attachment => (
             <Button
               key={attachment.id}
               mode="outlined"
@@ -136,6 +136,9 @@ const AttachmentViewer = ({
                   mode="contained"
                   onPress={async () => {
                     if (!selectedAttachment) {
+                      return;
+                    }
+                    if (!isAllowedAttachmentFileName(selectedAttachment.fileName)) {
                       return;
                     }
                     const downloadUrl = resolveDownloadUrl(selectedAttachment);

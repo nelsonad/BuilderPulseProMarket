@@ -85,7 +85,7 @@ function PostJobPage() {
   }
 
   return (
-    <Container maxWidth="sm" sx={{ py: 6 }}>
+    <Container maxWidth="md" sx={{ py: 6 }}>
       <Card elevation={3}>
         <CardContent>
           <Stack spacing={3}>
@@ -159,6 +159,7 @@ function PostJobPage() {
                     hidden
                     type="file"
                     multiple
+                    accept=".jpg,.jpeg,.png,.gif,.webp,.bmp,.pdf,.docx,.xlsx,.pptx,.txt,.rtf,.csv,.odt,.ods,.odp"
                     onChange={(event) =>
                       setAttachments(Array.from(event.target.files ?? []))
                     }

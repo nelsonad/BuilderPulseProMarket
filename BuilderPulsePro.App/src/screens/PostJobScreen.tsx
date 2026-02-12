@@ -1,6 +1,7 @@
 import React from 'react';
 import {View} from 'react-native';
 import {Button, Card, Chip, Text, TextInput} from 'react-native-paper';
+import {PendingAttachment} from '../types';
 import {styles} from '../styles';
 
 type PostJobScreenProps = {
@@ -12,12 +13,15 @@ type PostJobScreenProps = {
   zip: string;
   message: string;
   error: string;
+  attachments: PendingAttachment[];
   onTitleChange: (value: string) => void;
   onTradeChange: (value: string) => void;
   onDescriptionChange: (value: string) => void;
   onCityChange: (value: string) => void;
   onStateChange: (value: string) => void;
   onZipChange: (value: string) => void;
+  onAddAttachments: () => void;
+  onClearAttachments: () => void;
   onSubmit: () => void;
   onBackToDashboard: () => void;
 };
@@ -31,12 +35,15 @@ const PostJobScreen = ({
   zip,
   message,
   error,
+  attachments,
   onTitleChange,
   onTradeChange,
   onDescriptionChange,
   onCityChange,
   onStateChange,
   onZipChange,
+  onAddAttachments,
+  onClearAttachments,
   onSubmit,
   onBackToDashboard,
 }: PostJobScreenProps) => (
@@ -119,6 +126,20 @@ const PostJobScreen = ({
           value={zip}
           onChangeText={onZipChange}
         />
+        <Button mode="outlined" onPress={onAddAttachments}>
+          Add attachments
+        </Button>
+        {attachments.length > 0 ? (
+          <>
+            <Text style={styles.body}>
+              {attachments.length} attachment
+              {attachments.length > 1 ? 's' : ''} selected
+            </Text>
+            <Button mode="text" onPress={onClearAttachments}>
+              Clear attachments
+            </Button>
+          </>
+        ) : null}
         <Button mode="contained" onPress={onSubmit}>
           Submit job
         </Button>

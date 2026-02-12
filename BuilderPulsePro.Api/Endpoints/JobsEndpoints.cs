@@ -41,9 +41,6 @@ public static class JobsEndpoints
         group.MapGet("/{id:guid}/attachments/{attachmentId:guid}", DownloadJobAttachment);
         group.MapDelete("/{id:guid}/attachments/{attachmentId:guid}", DeleteJobAttachment).RequireAuthorization();
         group.MapGet("/{id:guid}/activity", GetJobActivity).RequireAuthorization();
-        group.MapGet("/{id:guid}/messages", GetJobMessages).RequireAuthorization();
-        group.MapPost("/{id:guid}/messages", SendJobMessage).RequireAuthorization();
-        group.MapPost("/{id:guid}/messages/{messageId:guid}/report", ReportJobMessage).RequireAuthorization();
         group.MapPost("/{id:guid}/review", CreateReview).RequireAuthorization();
         group.MapPost("/{id:guid}/complete", CompleteJob).RequireAuthorization();
 
@@ -213,6 +210,12 @@ public static class JobsEndpoints
 
         if (files.Count == 0)
             return Results.BadRequest("At least one attachment is required.");
+
+        var invalidFile = files.FirstOrDefault(file =>
+            file.Length > 0 && !AttachmentValidation.IsAllowedFileName(file.FileName));
+        if (invalidFile is not null)
+            return Results.BadRequest(
+                $"File type not allowed: {invalidFile.FileName}. Allowed types: {AttachmentValidation.AllowedExtensionsDisplay}.");
 
         var attachments = new List<Attachment>();
         var jobAttachments = new List<JobAttachment>();
@@ -415,142 +418,6 @@ public static class JobsEndpoints
         return Results.Ok(rows);
     }
 
-    private static async Task<IResult> GetJobMessages(
-        AppDbContext db,
-        Guid id,
-        ClaimsPrincipal user,
-        int take = 50)
-    {
-        var userId = CurrentUser.GetUserId(user);
-        take = Math.Clamp(take, 1, 200);
-
-        var job = await db.Jobs.AsNoTracking()
-            .Where(j => j.Id == id)
-            .Select(j => new { j.PostedByUserId, j.AcceptedBidId })
-            .FirstOrDefaultAsync();
-
-        if (job is null) return Results.NotFound();
-
-        if (job.AcceptedBidId is null)
-            return Results.BadRequest("Messaging is available after a bid is accepted.");
-
-        var contractorUserId = await db.Bids.AsNoTracking()
-            .Where(b => b.Id == job.AcceptedBidId.Value)
-            .Select(b => b.BidderUserId)
-            .FirstOrDefaultAsync();
-
-        if (contractorUserId == Guid.Empty) return Results.NotFound();
-
-        if (userId != job.PostedByUserId && userId != contractorUserId)
-            return Results.Forbid();
-
-        var conversation = await db.Conversations.AsNoTracking()
-            .FirstOrDefaultAsync(c => c.JobId == id);
-
-        if (conversation is null)
-            return Results.Ok(new List<JobMessageResponse>());
-
-        var rows = await db.Messages.AsNoTracking()
-            .Where(m => m.ConversationId == conversation.Id)
-            .OrderBy(m => m.CreatedAt)
-            .Take(take)
-            .Select(m => new JobMessageResponse(
-                m.Id,
-                id,
-                m.SenderUserId,
-                m.Body,
-                m.CreatedAt
-            ))
-            .ToListAsync();
-
-        return Results.Ok(rows);
-    }
-
-    private static async Task<IResult> SendJobMessage(
-        AppDbContext db,
-        Guid id,
-        SendJobMessageRequest req,
-        ClaimsPrincipal user,
-        IEventBus bus)
-    {
-        var userId = CurrentUser.GetUserId(user);
-
-        var body = (req.Body ?? "").Trim();
-        if (string.IsNullOrWhiteSpace(body))
-            return Results.BadRequest("Body is required.");
-
-        if (body.Length > 2000)
-            return Results.BadRequest("Body must be 2000 characters or fewer.");
-
-        var job = await db.Jobs.AsNoTracking()
-            .Where(j => j.Id == id)
-            .Select(j => new { j.PostedByUserId, j.AcceptedBidId })
-            .FirstOrDefaultAsync();
-
-        if (job is null) return Results.NotFound();
-
-        if (job.AcceptedBidId is null)
-            return Results.BadRequest("Messaging is available after a bid is accepted.");
-
-        var contractorUserId = await db.Bids.AsNoTracking()
-            .Where(b => b.Id == job.AcceptedBidId.Value)
-            .Select(b => b.BidderUserId)
-            .FirstOrDefaultAsync();
-
-        if (contractorUserId == Guid.Empty) return Results.NotFound();
-
-        if (userId != job.PostedByUserId && userId != contractorUserId)
-            return Results.Forbid();
-
-        var conversation = await db.Conversations
-            .FirstOrDefaultAsync(c => c.JobId == id);
-
-        if (conversation is null)
-        {
-            conversation = new Conversation
-            {
-                Id = Guid.NewGuid(),
-                JobId = id,
-                PosterUserId = job.PostedByUserId,
-                ContractorUserId = contractorUserId,
-                CreatedAt = DateTimeOffset.UtcNow
-            };
-
-            db.Conversations.Add(conversation);
-        }
-        else if (conversation.PosterUserId != job.PostedByUserId || conversation.ContractorUserId != contractorUserId)
-        {
-            conversation.PosterUserId = job.PostedByUserId;
-            conversation.ContractorUserId = contractorUserId;
-        }
-
-        var message = new Message
-        {
-            Id = Guid.NewGuid(),
-            ConversationId = conversation.Id,
-            SenderUserId = userId,
-            Body = body,
-            CreatedAt = DateTimeOffset.UtcNow
-        };
-
-        db.Messages.Add(message);
-        await db.SaveChangesAsync();
-
-        await bus.PublishAsync(new MessagePosted(
-            conversation.Id,
-            id,
-            userId,
-            DateTimeOffset.UtcNow));
-
-        return Results.Ok(new JobMessageResponse(
-            message.Id,
-            id,
-            message.SenderUserId,
-            message.Body,
-            message.CreatedAt
-        ));
-    }
-
     private static async Task<IResult> CreateReview(
         AppDbContext db,
         Guid id,
@@ -617,75 +484,6 @@ public static class JobsEndpoints
             review.Rating,
             review.Body,
             review.CreatedAt
-        ));
-    }
-
-    private static async Task<IResult> ReportJobMessage(
-        AppDbContext db,
-        Guid id,
-        Guid messageId,
-        ReportMessageRequest req,
-        ClaimsPrincipal user)
-    {
-        var userId = CurrentUser.GetUserId(user);
-
-        var reason = (req.Reason ?? "").Trim();
-        if (string.IsNullOrWhiteSpace(reason))
-            return Results.BadRequest("Reason is required.");
-        if (reason.Length > 1000)
-            return Results.BadRequest("Reason must be 1000 characters or fewer.");
-
-        var job = await db.Jobs.AsNoTracking()
-            .Where(j => j.Id == id)
-            .Select(j => new { j.PostedByUserId, j.AcceptedBidId })
-            .FirstOrDefaultAsync();
-
-        if (job is null) return Results.NotFound();
-        if (job.AcceptedBidId is null)
-            return Results.BadRequest("Messaging is available after a bid is accepted.");
-
-        var contractorUserId = await db.Bids.AsNoTracking()
-            .Where(b => b.Id == job.AcceptedBidId.Value)
-            .Select(b => b.BidderUserId)
-            .FirstOrDefaultAsync();
-
-        if (contractorUserId == Guid.Empty) return Results.NotFound();
-
-        if (userId != job.PostedByUserId && userId != contractorUserId)
-            return Results.Forbid();
-
-        var conversation = await db.Conversations.AsNoTracking()
-            .FirstOrDefaultAsync(c => c.JobId == id);
-
-        if (conversation is null) return Results.NotFound("Conversation not found.");
-
-        var message = await db.Messages.AsNoTracking()
-            .Where(m => m.Id == messageId && m.ConversationId == conversation.Id)
-            .Select(m => new { m.Id })
-            .FirstOrDefaultAsync();
-
-        if (message is null) return Results.NotFound("Message not found.");
-
-        var report = new MessageReport
-        {
-            Id = Guid.NewGuid(),
-            MessageId = messageId,
-            ReporterUserId = userId,
-            Reason = reason,
-            CreatedAt = DateTimeOffset.UtcNow
-        };
-
-        db.MessageReports.Add(report);
-        await db.SaveChangesAsync();
-
-        return Results.Ok(new MessageReportResponse(
-            report.Id,
-            report.MessageId,
-            report.ReporterUserId,
-            report.Reason,
-            report.CreatedAt,
-            report.ResolvedAt,
-            report.ResolvedByUserId
         ));
     }
 
