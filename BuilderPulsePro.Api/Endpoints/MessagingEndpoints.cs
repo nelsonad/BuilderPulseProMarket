@@ -127,15 +127,18 @@ public static class MessagingEndpoints
     {
         var userId = CurrentUser.GetUserId(user);
 
-        var contractorProfile = await db.ContractorProfiles.AsNoTracking()
-            .Where(p => p.UserId == userId)
-            .Select(p => new { p.UserId, p.DisplayName })
-            .FirstOrDefaultAsync();
+        var profileIds = await ContractorAuthz.GetContractorProfileIdsForUserAsync(db, userId);
+        if (profileIds.Count == 0) return Results.Forbid();
 
-        if (contractorProfile is null) return Results.Forbid();
+        var contractorProfiles = await db.ContractorProfiles.AsNoTracking()
+            .Where(p => profileIds.Contains(p.UserId))
+            .Select(p => new { p.UserId, p.DisplayName })
+            .ToListAsync();
+
+        var profileLookup = contractorProfiles.ToDictionary(p => p.UserId, p => p.DisplayName);
 
         var conversations = await db.Conversations.AsNoTracking()
-            .Where(c => c.ContractorProfileId == contractorProfile.UserId)
+            .Where(c => profileIds.Contains(c.ContractorProfileId))
             .Select(c => new
             {
                 c.Id,
@@ -174,6 +177,7 @@ public static class MessagingEndpoints
 
         var result = conversations.Select(c =>
         {
+            profileLookup.TryGetValue(c.ContractorProfileId, out var displayName);
             lastMessageLookup.TryGetValue(c.Id, out var last);
             unreadLookup.TryGetValue(c.Id, out var unreadCount);
 
@@ -181,7 +185,7 @@ public static class MessagingEndpoints
                 c.Id,
                 c.JobId,
                 c.ContractorProfileId,
-                contractorProfile.DisplayName,
+                displayName ?? "Contractor",
                 c.CreatedAt,
                 last?.CreatedAt,
                 last?.Body,
@@ -501,7 +505,10 @@ public static class MessagingEndpoints
         if (messageInfo is null) return Results.NotFound("Message not found.");
 
         if (userId != messageInfo.ClientUserId && userId != messageInfo.ContractorProfileId)
-            return Results.Forbid();
+        {
+            if (!await ContractorAuthz.CanActForContractorProfileAsync(db, userId, messageInfo.ContractorProfileId))
+                return Results.Forbid();
+        }
 
         var report = new MessageReport
         {
@@ -548,7 +555,10 @@ public static class MessagingEndpoints
             return (null, job, Results.BadRequest("Contractor cannot be the job poster."));
 
         if (userId != job.PostedByUserId && userId != contractorProfileId)
-            return (null, job, Results.Forbid());
+        {
+            if (!await ContractorAuthz.CanActForContractorProfileAsync(db, userId, contractorProfileId, ct))
+                return (null, job, Results.Forbid());
+        }
 
         var contractorProfile = await db.ContractorProfiles.AsNoTracking()
             .Where(p => p.UserId == contractorProfileId)

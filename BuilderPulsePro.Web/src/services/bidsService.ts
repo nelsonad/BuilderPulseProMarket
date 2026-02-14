@@ -1,30 +1,4 @@
-import { requestJson } from './apiClient'
-
-export type BidLineItem = {
-  id: string
-  bidId: string
-  description: string
-  quantity: number
-  unitPriceCents: number
-  totalCents: number
-  sortOrder: number
-}
-
-export type BidVariantLineItem = {
-  id: string
-  bidVariantId: string
-  description: string
-  quantity: number
-  unitPriceCents: number
-  totalCents: number
-  sortOrder: number
-}
-
-export type BidLineItemRequest = {
-  description: string
-  quantity: number
-  unitPriceCents: number
-}
+import { requestEmpty, requestJson } from './apiClient'
 
 export type BidVariant = {
   id: string
@@ -33,7 +7,6 @@ export type BidVariant = {
   amountCents: number
   notes?: string | null
   sortOrder: number
-  lineItems: BidVariantLineItem[]
 }
 
 export type Bid = {
@@ -50,7 +23,6 @@ export type Bid = {
   isAccepted: boolean
   status: string
   createdAt: string
-  lineItems: BidLineItem[]
   variants: BidVariant[]
 }
 
@@ -96,7 +68,6 @@ export type CreateBidRequest = {
   validUntil?: string | null
   terms?: string | null
   assumptions?: string | null
-  lineItems?: BidLineItemRequest[] | null
   variants?: never[] | null
 }
 
@@ -109,7 +80,7 @@ export type BidAttachmentParseResult = {
   validUntil?: string | null
   terms?: string | null
   assumptions?: string | null
-  lineItems: BidLineItem[]
+  notes?: string | null
   variants: BidVariant[]
 }
 
@@ -124,8 +95,62 @@ export type BidAttachmentParseJob = {
   result?: BidAttachmentParseResult | null
 }
 
+export type BidRevision = {
+  id: string
+  bidId: string
+  revisionNumber: number
+  createdByUserId: string
+  createdAt: string
+  amountCents: number
+  earliestStart?: string | null
+  durationDays?: number | null
+  notes: string
+  validUntil?: string | null
+  terms?: string | null
+  assumptions?: string | null
+  variants: BidVariant[]
+}
+
 export const getBidsForJob = async (token: string, jobId: string) =>
   requestJson<Bid[]>(`/jobs/${jobId}/bids`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  })
+
+export const getBid = async (token: string, jobId: string, bidId: string) =>
+  requestJson<Bid>(`/jobs/${jobId}/bids/${bidId}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  })
+
+export const getBidRevisions = async (token: string, jobId: string, bidId: string) =>
+  requestJson<BidRevision[]>(`/jobs/${jobId}/bids/${bidId}/revisions`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  })
+
+export const acceptBid = async (token: string, jobId: string, bidId: string) =>
+  requestEmpty(`/jobs/${jobId}/bids/${bidId}/accept`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  })
+
+export const rejectBid = async (token: string, jobId: string, bidId: string) =>
+  requestEmpty(`/jobs/${jobId}/bids/${bidId}/reject`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  })
+
+export const withdrawBid = async (token: string, bidId: string) =>
+  requestJson<MyBid[]>(`/contractor/bids/${bidId}`, {
+    method: 'DELETE',
     headers: {
       Authorization: `Bearer ${token}`,
     },
@@ -210,6 +235,27 @@ export const uploadBidAttachments = async (
 
 export const getBidAttachmentParseJobs = async (token: string, jobId: string, bidId: string) =>
   requestJson<BidAttachmentParseJob[]>(`/jobs/${jobId}/bids/${bidId}/attachments/parse`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  })
+
+export const startBidAttachmentParse = async (token: string, jobId: string, bidId: string) =>
+  requestJson<BidAttachmentParseJob[]>(`/jobs/${jobId}/bids/${bidId}/attachments/parse`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  })
+
+export const regenerateBidAttachmentParse = async (
+  token: string,
+  jobId: string,
+  bidId: string,
+  attachmentId: string,
+) =>
+  requestJson<BidAttachmentParseJob>(`/jobs/${jobId}/bids/${bidId}/attachments/${attachmentId}/parse`, {
+    method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
     },

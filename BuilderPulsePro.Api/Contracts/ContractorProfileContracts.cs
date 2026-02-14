@@ -1,4 +1,10 @@
-﻿namespace BuilderPulsePro.Api.Contracts;
+namespace BuilderPulsePro.Api.Contracts;
+
+/// <summary>Service area in API responses (center resolved from zip at save time).</summary>
+public record ServiceAreaItem(double Lat, double Lng, int RadiusMeters, string? Label, string? Zip);
+
+/// <summary>Service area in upsert requests: zip is looked up to get lat/lng (same pattern as main location).</summary>
+public record ServiceAreaRequestItem(string Zip, int RadiusMeters, string? Label);
 
 public record ContractorProfileResponse(
     string DisplayName,
@@ -9,6 +15,7 @@ public record ContractorProfileResponse(
     double Lat,
     double Lng,
     int ServiceRadiusMeters,
+    ServiceAreaItem[] ServiceAreas,
     bool IsAvailable,
     string? UnavailableReason,
     DateTimeOffset UpdatedAt
@@ -23,6 +30,7 @@ public record UpsertContractorProfileRequest(
     double Lat,
     double Lng,
     int ServiceRadiusMeters,
+    ServiceAreaRequestItem[]? ServiceAreas,
     bool? IsAvailable,
     string? UnavailableReason
 );

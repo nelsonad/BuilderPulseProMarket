@@ -9,5 +9,4 @@ public class BidVariant
     public string? Notes { get; set; }
     public long AmountCents { get; set; }
     public int SortOrder { get; set; }
-    public ICollection<BidVariantLineItem> LineItems { get; set; } = new List<BidVariantLineItem>();
 }

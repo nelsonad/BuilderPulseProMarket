@@ -66,7 +66,11 @@ function ContractorProfilePage() {
         setState(profile.state ?? '')
         setZip(profile.zip ?? '')
         setTrades(normalizeTrades(profile.trades))
-        setRadius(profile.serviceRadiusMeters.toString())
+        setRadius(
+          profile.serviceAreas?.length
+            ? profile.serviceAreas[0].radiusMeters.toString()
+            : profile.serviceRadiusMeters.toString()
+        )
         setIsAvailable(profile.isAvailable)
         setUnavailableReason(profile.unavailableReason ?? '')
       } catch (err) {

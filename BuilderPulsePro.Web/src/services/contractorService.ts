@@ -10,6 +10,22 @@ const buildError = async (response: Response) => {
   return text || `Request failed (${response.status})`
 }
 
+/** Service area in API responses (center resolved from zip at save time). */
+export type ServiceAreaItem = {
+  lat: number
+  lng: number
+  radiusMeters: number
+  label?: string | null
+  zip?: string | null
+}
+
+/** Service area in upsert requests: zip is looked up to get lat/lng (same pattern as main location). */
+export type ServiceAreaRequestItem = {
+  zip: string
+  radiusMeters: number
+  label?: string | null
+}
+
 export type ContractorProfile = {
   displayName: string
   trades: string[]
@@ -19,6 +35,7 @@ export type ContractorProfile = {
   lat: number
   lng: number
   serviceRadiusMeters: number
+  serviceAreas: ServiceAreaItem[]
   isAvailable: boolean
   unavailableReason?: string | null
   updatedAt: string
@@ -55,6 +72,8 @@ export type UpsertContractorProfileRequest = {
   lat?: number
   lng?: number
   serviceRadiusMeters: number
+  /** When provided, replaces all service areas (each uses zip for lat/lng lookup). When omitted, single area from profile zip + serviceRadiusMeters is used. */
+  serviceAreas?: ServiceAreaRequestItem[] | null
   isAvailable?: boolean
   unavailableReason?: string | null
 }

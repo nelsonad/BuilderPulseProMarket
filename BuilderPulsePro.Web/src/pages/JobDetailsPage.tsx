@@ -5,6 +5,11 @@ import {
   Card,
   CardContent,
   Container,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogContentText,
+  DialogTitle,
   MenuItem,
   Link,
   Stack,
@@ -14,8 +19,16 @@ import {
   Typography,
 } from '@mui/material'
 import AttachmentViewer from '../components/AttachmentViewer'
+import BidAttachmentViewer from '../components/BidAttachmentViewer'
 import JobMessagesPanel from '../components/JobMessagesPanel'
-import { type Bid, getBidsForJob } from '../services/bidsService'
+import {
+  acceptBid,
+  type Bid,
+  type BidAttachment,
+  getBidAttachments,
+  getBidsForJob,
+  rejectBid,
+} from '../services/bidsService'
 import { listJobConversations } from '../services/messagingService'
 import {
   getJob,
@@ -50,6 +63,10 @@ function JobDetailsPage() {
   const [bidsLoading, setBidsLoading] = useState(false)
   const [contractorLookup, setContractorLookup] = useState<Record<string, string>>({})
   const [messageContractorId, setMessageContractorId] = useState<string | null>(null)
+  const [acceptConfirmBidId, setAcceptConfirmBidId] = useState<string | null>(null)
+  const [rejectConfirmBidId, setRejectConfirmBidId] = useState<string | null>(null)
+  const [bidActionLoading, setBidActionLoading] = useState(false)
+  const [bidAttachments, setBidAttachments] = useState<Record<string, BidAttachment[]>>({})
 
   const formattedCreatedAt = job?.createdAt
     ? new Date(job.createdAt).toLocaleString('en-US', {
@@ -144,6 +161,15 @@ function JobDetailsPage() {
         }
 
         setBids(bidResponse ?? [])
+        const bidList = bidResponse ?? []
+        const attachmentEntries = await Promise.all(
+          bidList.map(async (bid) => {
+            const items = await getBidAttachments(token, jobId, bid.id)
+            return [bid.id, items] as const
+          }),
+        )
+        const attachmentMap = Object.fromEntries(attachmentEntries) as Record<string, BidAttachment[]>
+        setBidAttachments(attachmentMap)
         const lookup = conversationResponse.reduce<Record<string, string>>((acc, conversation) => {
           acc[conversation.contractorProfileId] = conversation.contractorDisplayName
           return acc
@@ -177,7 +203,65 @@ function JobDetailsPage() {
           day: 'numeric',
           year: 'numeric',
         })
-      : '—'
+      : '?'
+
+  const handleAcceptBid = async (bidId: string) => {
+    const token = getAuthToken()
+    if (!token || !jobId) return
+    setBidActionLoading(true)
+    setBidsError('')
+    try {
+      await acceptBid(token, jobId, bidId)
+      setAcceptConfirmBidId(null)
+      const [jobResponse, bidResponse] = await Promise.all([
+        getJob(jobId),
+        getBidsForJob(token, jobId),
+      ])
+      setJob(jobResponse)
+      const bidList = bidResponse ?? []
+      setBids(bidList)
+      const attachmentEntries = await Promise.all(
+        bidList.map(async (bid) => {
+          const items = await getBidAttachments(token, jobId, bid.id)
+          return [bid.id, items] as const
+        }),
+      )
+      setBidAttachments(Object.fromEntries(attachmentEntries) as Record<string, BidAttachment[]>)
+      setSuccessMessage('Bid accepted.')
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unable to accept bid.'
+      setBidsError(message)
+    } finally {
+      setBidActionLoading(false)
+    }
+  }
+
+  const handleRejectBid = async (bidId: string) => {
+    const token = getAuthToken()
+    if (!token || !jobId) return
+    setBidActionLoading(true)
+    setBidsError('')
+    try {
+      await rejectBid(token, jobId, bidId)
+      setRejectConfirmBidId(null)
+      const bidResponse = await getBidsForJob(token, jobId)
+      const bidList = bidResponse ?? []
+      setBids(bidList)
+      const attachmentEntries = await Promise.all(
+        bidList.map(async (bid) => {
+          const items = await getBidAttachments(token, jobId, bid.id)
+          return [bid.id, items] as const
+        }),
+      )
+      setBidAttachments(Object.fromEntries(attachmentEntries) as Record<string, BidAttachment[]>)
+      setSuccessMessage('Bid declined.')
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unable to decline bid.'
+      setBidsError(message)
+    } finally {
+      setBidActionLoading(false)
+    }
+  }
 
   const handleSave = async () => {
     setErrorMessage('')
@@ -405,6 +489,12 @@ function JobDetailsPage() {
                         <Card key={bid.id} variant="outlined">
                           <CardContent>
                             <Stack spacing={1}>
+                              <Stack spacing={0.5}>
+                                <Typography variant="subtitle2" color="text.secondary">
+                                  Bid attachments
+                                </Typography>
+                                <BidAttachmentViewer attachments={bidAttachments[bid.id] ?? []} />
+                              </Stack>
                               <Typography fontWeight={600}>
                                 {contractorLookup[bid.contractorProfileId] ?? 'Contractor'}
                               </Typography>
@@ -435,9 +525,28 @@ function JobDetailsPage() {
                                   ) : null}
                                 </Stack>
                                 <Stack spacing={1} alignItems={{ xs: 'flex-start', sm: 'flex-end' }}>
-                                  <Typography color="text.secondary">
-                                    Line items: {bid.lineItems.length}
-                                  </Typography>
+                                  {job?.status === 'Open' &&
+                                    !['Accepted', 'Rejected', 'Withdrawn'].includes(bid.status) ? (
+                                    <Stack direction="row" spacing={1} flexWrap="wrap">
+                                      <Button
+                                        variant="contained"
+                                        size="small"
+                                        disabled={bidActionLoading}
+                                        onClick={() => setAcceptConfirmBidId(bid.id)}
+                                      >
+                                        Accept bid
+                                      </Button>
+                                      <Button
+                                        variant="outlined"
+                                        size="small"
+                                        color="error"
+                                        disabled={bidActionLoading}
+                                        onClick={() => setRejectConfirmBidId(bid.id)}
+                                      >
+                                        Decline
+                                      </Button>
+                                    </Stack>
+                                  ) : null}
                                   <Button
                                     variant="outlined"
                                     size="small"
@@ -464,6 +573,59 @@ function JobDetailsPage() {
             </Stack>
             {errorMessage ? <Typography color="error">{errorMessage}</Typography> : null}
             {successMessage ? <Typography color="success.main">{successMessage}</Typography> : null}
+            <Dialog
+              open={acceptConfirmBidId !== null}
+              onClose={() => !bidActionLoading && setAcceptConfirmBidId(null)}
+              aria-labelledby="accept-dialog-title"
+              aria-describedby="accept-dialog-description"
+            >
+              <DialogTitle id="accept-dialog-title">Award this bid?</DialogTitle>
+              <DialogContent>
+                <DialogContentText id="accept-dialog-description">
+                  This contractor will be awarded the job. Other bids will be declined and those contractors will be notified.
+                </DialogContentText>
+              </DialogContent>
+              <DialogActions>
+                <Button onClick={() => setAcceptConfirmBidId(null)} disabled={bidActionLoading}>
+                  Cancel
+                </Button>
+                <Button
+                  variant="contained"
+                  onClick={() => acceptConfirmBidId && handleAcceptBid(acceptConfirmBidId)}
+                  disabled={bidActionLoading}
+                  autoFocus
+                >
+                  {bidActionLoading ? 'Accepting?' : 'Accept bid'}
+                </Button>
+              </DialogActions>
+            </Dialog>
+            <Dialog
+              open={rejectConfirmBidId !== null}
+              onClose={() => !bidActionLoading && setRejectConfirmBidId(null)}
+              aria-labelledby="reject-dialog-title"
+              aria-describedby="reject-dialog-description"
+            >
+              <DialogTitle id="reject-dialog-title">Decline this bid?</DialogTitle>
+              <DialogContent>
+                <DialogContentText id="reject-dialog-description">
+                  The contractor will be notified that their bid was declined. They will no longer see this as a potential bid.
+                </DialogContentText>
+              </DialogContent>
+              <DialogActions>
+                <Button onClick={() => setRejectConfirmBidId(null)} disabled={bidActionLoading}>
+                  Cancel
+                </Button>
+                <Button
+                  color="error"
+                  variant="contained"
+                  onClick={() => rejectConfirmBidId && handleRejectBid(rejectConfirmBidId)}
+                  disabled={bidActionLoading}
+                  autoFocus
+                >
+                  {bidActionLoading ? 'Declining?' : 'Decline bid'}
+                </Button>
+              </DialogActions>
+            </Dialog>
             <Stack spacing={1}>
               <Link component={RouterLink} to="/client-dashboard">
                 Back to dashboard

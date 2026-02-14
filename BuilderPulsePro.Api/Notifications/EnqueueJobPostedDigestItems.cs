@@ -25,7 +25,12 @@ public sealed class EnqueueJobPostedDigestItems(AppDbContext db) : IEventHandler
             .Where(p =>
                 p.UserId != job.PostedByUserId
                 && p.IsAvailable
-                && p.HomeBase.Distance(job.SiteLocation) <= p.ServiceRadiusMeters
+                && (
+                    db.ContractorServiceAreas.Any(sa =>
+                        sa.ContractorProfileId == p.UserId
+                        && sa.Center.Distance(job.SiteLocation) <= sa.RadiusMeters)
+                    || (!db.ContractorServiceAreas.Any(sa => sa.ContractorProfileId == p.UserId)
+                        && p.HomeBase.Distance(job.SiteLocation) <= p.ServiceRadiusMeters))
                 && (
                     p.TradesCsv == normalizedTrade
                     || EF.Functions.ILike(p.TradesCsv, patternMiddle)

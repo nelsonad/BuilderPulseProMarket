@@ -6,6 +6,11 @@ import {
   CardContent,
   CircularProgress,
   Container,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogContentText,
+  DialogTitle,
   Link,
   Stack,
   Tabs,
@@ -22,14 +27,19 @@ import {
   type BidAttachment,
   type BidAttachmentParseJob,
   type BidAttachmentParseResult,
-  type BidLineItemRequest,
+  type BidRevision,
   type MyBid,
+  getBid,
   getBidAttachmentParseJobs,
   getBidAttachments,
+  getBidRevisions,
   getMyBids,
   parseBidAttachmentPreview,
+  regenerateBidAttachmentParse,
+  startBidAttachmentParse,
   updateBid,
   uploadBidAttachments,
+  withdrawBid,
 } from '../services/bidsService'
 import { getJob, getJobAttachments, type Job, type JobAttachment } from '../services/jobsService'
 import { getAuthToken, setAuthRedirect } from '../services/storageService'
@@ -50,6 +60,8 @@ function ContractorJobDetailsPage() {
   const [pendingBidAttachments, setPendingBidAttachments] = useState<Record<string, File[]>>({})
   const [bidAttachmentUploading, setBidAttachmentUploading] = useState<string | null>(null)
   const [bidParseStatus, setBidParseStatus] = useState<Record<string, BidAttachmentParseJob | null>>({})
+  const [startParseBidId, setStartParseBidId] = useState<string | null>(null)
+  const [startParseAttachmentId, setStartParseAttachmentId] = useState<string | null>(null)
   const [bidAmount, setBidAmount] = useState('')
   const [bidNotes, setBidNotes] = useState('')
   const [bidEarliestStart, setBidEarliestStart] = useState('')
@@ -65,30 +77,15 @@ function ContractorJobDetailsPage() {
   const [bidFormPreviewOpen, setBidFormPreviewOpen] = useState(false)
   const [parsePreview, setParsePreview] = useState<{ bidId: string; result: BidAttachmentParseResult } | null>(null)
   const [parseApplying, setParseApplying] = useState(false)
-  const [bidLineItems, setBidLineItems] = useState<
-    { id: string; description: string; quantity: string; unitPrice: string }[]
-  >([])
+  const [editingBidId, setEditingBidId] = useState<string | null>(null)
+  const [withdrawConfirmBidId, setWithdrawConfirmBidId] = useState<string | null>(null)
+  const [bidRevisions, setBidRevisions] = useState<BidRevision[]>([])
+  const [bidRevisionsLoading, setBidRevisionsLoading] = useState(false)
+  const [revisionsForBidId, setRevisionsForBidId] = useState<string | null>(null)
 
   const buildEmptyParseResult = (): BidAttachmentParseResult => ({
-    lineItems: [],
     variants: [],
   })
-
-  const toBidLineItemRequest = (items: typeof bidLineItems): BidLineItemRequest[] =>
-    items
-      .map((item) => ({
-        description: item.description.trim(),
-        quantity: Number.parseInt(item.quantity, 10),
-        unitPriceCents: Math.round(Number.parseFloat(item.unitPrice) * 100),
-      }))
-      .filter(
-        (item) =>
-          item.description.length > 0 &&
-          Number.isFinite(item.quantity) &&
-          item.quantity > 0 &&
-          Number.isFinite(item.unitPriceCents) &&
-          item.unitPriceCents > 0,
-      )
 
   const formattedCreatedAt = job?.createdAt
     ? new Date(job.createdAt).toLocaleString('en-US', {
@@ -110,25 +107,20 @@ function ContractorJobDetailsPage() {
   }, [location.pathname, navigate])
 
   const handleBidFormAttachmentChange = (files: FileList | null) => {
-    if (!files) {
-      return
-    }
+    if (!files) return
+    setBidFormAttachments(Array.from(files))
+    setBidFormParseResult(null)
+    setBidsError('')
+  }
 
-    const nextFiles = Array.from(files)
-    setBidFormAttachments(nextFiles)
-
+  const handleBidFormParseFile = (file: File) => {
     const token = getAuthToken()
-    if (!token || !jobId) {
-      return
-    }
-
+    if (!token || !jobId) return
     setBidsError('')
     setBidFormParsing(true)
-
-    parseBidAttachmentPreview(token, jobId, nextFiles)
+    parseBidAttachmentPreview(token, jobId, [file])
       .then((result) => {
         if (result) {
-          applyParsedResult(result)
           setBidFormParseResult(result)
         } else {
           setBidFormParseResult(buildEmptyParseResult())
@@ -139,11 +131,13 @@ function ContractorJobDetailsPage() {
         const message = err instanceof Error ? err.message : 'Unable to parse bid attachment.'
         setBidsError(message)
         setBidFormParseResult(null)
-        setBidFormPreviewOpen(false)
       })
-      .finally(() => {
-        setBidFormParsing(false)
-      })
+      .finally(() => setBidFormParsing(false))
+  }
+
+  const handleBidFormRemoveFile = (index: number) => {
+    setBidFormAttachments((prev) => prev.filter((_, i) => i !== index))
+    setBidFormParseResult(null)
   }
 
   const findParsedResult = (jobs: BidAttachmentParseJob[]) => {
@@ -185,14 +179,11 @@ function ContractorJobDetailsPage() {
       setBidAssumptions(result.assumptions)
     }
 
-    if (result.lineItems.length > 0) {
-      setBidLineItems(
-        result.lineItems.map((item) => ({
-          id: crypto.randomUUID(),
-          description: item.description,
-          quantity: item.quantity.toString(),
-          unitPrice: (item.unitPriceCents / 100).toFixed(2),
-        })),
+    if (result.notes?.trim()) {
+      setBidNotes((prev) =>
+        prev.trim()
+          ? `${prev.trim()}\n\n${result.notes!.trim()}`
+          : result.notes!.trim(),
       )
     }
   }
@@ -220,21 +211,21 @@ function ContractorJobDetailsPage() {
     currentBid: MyBid,
     result: BidAttachmentParseResult,
   ) => {
-    const lineItems = result.lineItems.map((item) => ({
-      description: item.description,
-      quantity: item.quantity,
-      unitPriceCents: item.unitPriceCents,
-    }))
+    const notes =
+      result.notes?.trim()
+        ? currentBid.notes?.trim()
+          ? `${currentBid.notes.trim()}\n\n${result.notes.trim()}`
+          : result.notes.trim()
+        : currentBid.notes ?? null
 
     const updated = await updateBid(token, jobIdValue, bidId, {
       amountCents: result.amountCents ?? currentBid.amountCents,
       earliestStart: result.earliestStart ?? currentBid.earliestStart ?? null,
       durationDays: result.durationDays ?? currentBid.durationDays ?? null,
-      notes: currentBid.notes ?? null,
+      notes,
       validUntil: result.validUntil ?? currentBid.validUntil ?? null,
       terms: result.terms ?? currentBid.terms ?? null,
       assumptions: result.assumptions ?? currentBid.assumptions ?? null,
-      lineItems: lineItems.length > 0 ? lineItems : null,
       variants: null,
     })
 
@@ -380,6 +371,78 @@ function ContractorJobDetailsPage() {
     }
   }
 
+  const handleStartEditBid = async (bidId: string) => {
+    const token = getAuthToken()
+    if (!token || !jobId) return
+    setBidsError('')
+    try {
+      const bid = await getBid(token, jobId, bidId)
+      setBidAmount((bid.amountCents / 100).toFixed(2))
+      setBidNotes(bid.notes ?? '')
+      setBidEarliestStart(bid.earliestStart ? bid.earliestStart.slice(0, 10) : '')
+      setBidDurationDays(bid.durationDays?.toString() ?? '')
+      setBidValidUntil(bid.validUntil ? bid.validUntil.slice(0, 10) : '')
+      setBidTerms(bid.terms ?? '')
+      setBidAssumptions(bid.assumptions ?? '')
+      setEditingBidId(bidId)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unable to load bid.'
+      setBidsError(message)
+    }
+  }
+
+  const handleCancelEdit = () => {
+    setEditingBidId(null)
+    setBidAmount('')
+    setBidNotes('')
+    setBidEarliestStart('')
+    setBidDurationDays('')
+    setBidValidUntil('')
+    setBidTerms('')
+    setBidAssumptions('')
+  }
+
+  const handleWithdrawBid = async (bidId: string) => {
+    const token = getAuthToken()
+    if (!token) return
+    setBidsError('')
+    try {
+      const result = await withdrawBid(token, bidId)
+      if (jobId) {
+        setBids(result.filter((b) => b.job.jobId === jobId))
+      }
+      setWithdrawConfirmBidId(null)
+      setBidSuccessMessage('Bid withdrawn.')
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unable to withdraw bid.'
+      setBidsError(message)
+    }
+  }
+
+  useEffect(() => {
+    if (!revisionsForBidId || !jobId) {
+      setBidRevisions([])
+      return
+    }
+    const token = getAuthToken()
+    if (!token) return
+    let isActive = true
+    setBidRevisionsLoading(true)
+    getBidRevisions(token, jobId, revisionsForBidId)
+      .then((list) => {
+        if (isActive) setBidRevisions(list ?? [])
+      })
+      .catch(() => {
+        if (isActive) setBidRevisions([])
+      })
+      .finally(() => {
+        if (isActive) setBidRevisionsLoading(false)
+      })
+    return () => {
+      isActive = false
+    }
+  }, [revisionsForBidId, jobId])
+
   const locationLabel = useMemo(() => {
     if (!job) {
       return ''
@@ -437,35 +500,57 @@ function ContractorJobDetailsPage() {
         ...current,
         [bidId]: [],
       }))
-
-      setBidParseStatus((current) => ({
-        ...current,
-        [bidId]: {
-          id: '',
-          bidId,
-          attachmentId: '',
-          status: 'Processing',
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          errorMessage: null,
-          result: null,
-        },
-      }))
-
-      const parsedResult = await pollForParsedResult(token, jobId, bidId)
-      if (parsedResult) {
-        const latestJobs = await getBidAttachmentParseJobs(token, jobId, bidId)
-        const latest = getLatestParseJob(latestJobs ?? [])
-        setBidParseStatus((current) => ({
-          ...current,
-          [bidId]: latest,
-        }))
-      }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unable to upload bid attachments.'
       setBidsError(message)
     } finally {
       setBidAttachmentUploading(null)
+    }
+  }
+
+  const handleStartBidParse = async (bidId: string) => {
+    const token = getAuthToken()
+    if (!token || !jobId) return
+    setBidsError('')
+    setStartParseBidId(bidId)
+    try {
+      const jobs = await startBidAttachmentParse(token, jobId, bidId)
+      const latest = getLatestParseJob(jobs ?? [])
+      setBidParseStatus((current) => ({ ...current, [bidId]: latest ?? null }))
+      const parsedResult = await pollForParsedResult(token, jobId, bidId)
+      if (parsedResult) {
+        const latestJobs = await getBidAttachmentParseJobs(token, jobId, bidId)
+        const latestJob = getLatestParseJob(latestJobs ?? [])
+        setBidParseStatus((current) => ({ ...current, [bidId]: latestJob ?? null }))
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unable to start parse.'
+      setBidsError(message)
+    } finally {
+      setStartParseBidId(null)
+    }
+  }
+
+  const handleStartBidParseAttachment = async (bidId: string, attachmentId: string) => {
+    const token = getAuthToken()
+    if (!token || !jobId) return
+    setBidsError('')
+    setStartParseBidId(bidId)
+    setStartParseAttachmentId(attachmentId)
+    try {
+      await regenerateBidAttachmentParse(token, jobId, bidId, attachmentId)
+      const parsedResult = await pollForParsedResult(token, jobId, bidId)
+      if (parsedResult) {
+        const latestJobs = await getBidAttachmentParseJobs(token, jobId, bidId)
+        const latestJob = getLatestParseJob(latestJobs ?? [])
+        setBidParseStatus((current) => ({ ...current, [bidId]: latestJob ?? null }))
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unable to parse attachment.'
+      setBidsError(message)
+    } finally {
+      setStartParseBidId(null)
+      setStartParseAttachmentId(null)
     }
   }
 
@@ -485,14 +570,8 @@ function ContractorJobDetailsPage() {
     setBidsError('')
     setBidSuccessMessage('')
 
-    const lineItemsPayload = toBidLineItemRequest(bidLineItems)
-    const lineItemsTotal =
-      lineItemsPayload.length > 0
-        ? lineItemsPayload.reduce((total, item) => total + item.quantity * item.unitPriceCents, 0)
-        : null
-
-    const amountValue = Number.parseFloat(bidAmount)
-    if ((lineItemsTotal ?? Math.round(amountValue * 100)) <= 0 || (!lineItemsTotal && !Number.isFinite(amountValue))) {
+    const amountCents = Math.round(Number.parseFloat(bidAmount) * 100)
+    if (!Number.isFinite(amountCents) || amountCents <= 0) {
       setBidsError('Bid amount must be greater than 0.')
       return
     }
@@ -505,85 +584,95 @@ function ContractorJobDetailsPage() {
 
     setBidSubmitting(true)
 
+    const payload = {
+      amountCents,
+      earliestStart: bidEarliestStart ? new Date(bidEarliestStart).toISOString() : null,
+      durationDays: durationValue ?? null,
+      notes: bidNotes.trim() || null,
+      validUntil: bidValidUntil ? new Date(bidValidUntil).toISOString() : null,
+      terms: bidTerms.trim() || null,
+      assumptions: bidAssumptions.trim() || null,
+      variants: null,
+    }
+
     try {
-      const bid = await createBid(token, jobId, {
-        amountCents: lineItemsTotal ?? Math.round(amountValue * 100),
-        earliestStart: bidEarliestStart ? new Date(bidEarliestStart).toISOString() : null,
-        durationDays: durationValue ?? null,
-        notes: bidNotes.trim() || null,
-        validUntil: bidValidUntil ? new Date(bidValidUntil).toISOString() : null,
-        terms: bidTerms.trim() || null,
-        assumptions: bidAssumptions.trim() || null,
-        lineItems: lineItemsPayload.length > 0 ? lineItemsPayload : null,
-        variants: null,
-      })
+      if (editingBidId) {
+        const bid = await updateBid(token, jobId, editingBidId, payload)
+        setBids((current) =>
+          current.map((b) =>
+            b.bidId === editingBidId
+              ? {
+                  ...b,
+                  amountCents: bid.amountCents,
+                  earliestStart: bid.earliestStart,
+                  durationDays: bid.durationDays,
+                  notes: bid.notes,
+                  validUntil: bid.validUntil,
+                  terms: bid.terms,
+                  assumptions: bid.assumptions,
+                  status: bid.status,
+                }
+              : b,
+          ),
+        )
+        setEditingBidId(null)
+        setBidAmount('')
+        setBidNotes('')
+        setBidEarliestStart('')
+        setBidDurationDays('')
+        setBidValidUntil('')
+        setBidTerms('')
+        setBidAssumptions('')
+        setBidSuccessMessage('Bid updated.')
+      } else {
+        const bid = await createBid(token, jobId, payload)
 
-      setBids((current) => [...current, {
-        bidId: bid.id,
-        amountCents: bid.amountCents,
-        earliestStart: bid.earliestStart,
-        durationDays: bid.durationDays,
-        notes: bid.notes,
-        validUntil: bid.validUntil,
-        terms: bid.terms,
-        assumptions: bid.assumptions,
-        isAccepted: bid.isAccepted,
-        status: bid.status,
-        bidCreatedAt: bid.createdAt,
-        job: {
-          jobId: bid.jobId,
-          title: job?.title ?? '',
-          trade: job?.trade ?? '',
-          status: job?.status ?? '',
-          jobCreatedAt: job?.createdAt ?? bid.createdAt,
-          postedByUserId: '',
-        },
-      }])
-
-      if (bidFormAttachments.length > 0) {
-        const uploaded = await uploadBidAttachments(token, jobId, bid.id, bidFormAttachments)
-        setBidAttachments((current) => ({
-          ...current,
-          [bid.id]: uploaded ?? [],
-        }))
-        setBidFormAttachments([])
-
-        setBidParseStatus((current) => ({
-          ...current,
-          [bid.id]: {
-            id: '',
+        setBids((current) => {
+          const newEntry = {
             bidId: bid.id,
-            attachmentId: '',
-            status: 'Processing',
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-            errorMessage: null,
-            result: null,
-          },
-        }))
+            amountCents: bid.amountCents,
+            earliestStart: bid.earliestStart,
+            durationDays: bid.durationDays,
+            notes: bid.notes,
+            validUntil: bid.validUntil,
+            terms: bid.terms,
+            assumptions: bid.assumptions,
+            isAccepted: bid.isAccepted,
+            status: bid.status,
+            bidCreatedAt: bid.createdAt,
+            job: {
+              jobId: bid.jobId,
+              title: job?.title ?? '',
+              trade: job?.trade ?? '',
+              status: job?.status ?? '',
+              jobCreatedAt: job?.createdAt ?? bid.createdAt,
+              postedByUserId: '',
+            },
+          }
+          const withoutThisJob = current.filter((b) => b.job.jobId !== jobId)
+          return [...withoutThisJob, newEntry]
+        })
 
-        const parsedResult = await pollForParsedResult(token, jobId, bid.id)
-        if (parsedResult) {
-          const latestJobs = await getBidAttachmentParseJobs(token, jobId, bid.id)
-          const latest = getLatestParseJob(latestJobs ?? [])
-          setBidParseStatus((current) => ({
+        if (bidFormAttachments.length > 0) {
+          const uploaded = await uploadBidAttachments(token, jobId, bid.id, bidFormAttachments)
+          setBidAttachments((current) => ({
             ...current,
-            [bid.id]: latest,
+            [bid.id]: uploaded ?? [],
           }))
+          setBidFormAttachments([])
         }
-      }
 
-      setBidAmount('')
-      setBidNotes('')
-      setBidEarliestStart('')
-      setBidDurationDays('')
-      setBidValidUntil('')
-      setBidTerms('')
-      setBidAssumptions('')
-      setBidLineItems([])
-      setBidSuccessMessage('Bid submitted.')
+        setBidAmount('')
+        setBidNotes('')
+        setBidEarliestStart('')
+        setBidDurationDays('')
+        setBidValidUntil('')
+        setBidTerms('')
+        setBidAssumptions('')
+        setBidSuccessMessage('Bid submitted.')
+      }
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unable to submit bid.'
+      const message = err instanceof Error ? err.message : (editingBidId ? 'Unable to update bid.' : 'Unable to submit bid.')
       setBidsError(message)
     } finally {
       setBidSubmitting(false)
@@ -674,11 +763,84 @@ function ContractorJobDetailsPage() {
                   {bidsLoading && <Typography color="text.secondary">Loading bids...</Typography>}
                   {bidsError && <Typography color="error">{bidsError}</Typography>}
                   {bidSuccessMessage && <Typography color="success.main">{bidSuccessMessage}</Typography>}
-                  {!bidsLoading && bids.length === 0 ? (
+                  {!bidsLoading &&
+                  (bids.length === 0 ||
+                    editingBidId ||
+                    (bids.length === 1 && bids[0].status === 'Withdrawn')) ? (
                     <Card variant="outlined">
                       <CardContent>
                         <Stack spacing={2}>
-                          <Typography fontWeight={600}>Submit your bid</Typography>
+                          {bids.length === 1 && bids[0].status === 'Withdrawn' && !editingBidId ? (
+                            <Typography color="text.secondary">
+                              You withdrew your previous bid. You can submit a new bid below.
+                            </Typography>
+                          ) : null}
+                          <Typography fontWeight={600}>
+                            {editingBidId ? 'Edit your bid' : 'Submit your bid'}
+                          </Typography>
+                          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems="center">
+                            <Button variant="outlined" component="label">
+                              Add attachments
+                              <input
+                                hidden
+                                type="file"
+                                multiple
+                                accept=".jpg,.jpeg,.png,.gif,.webp,.bmp,.pdf,.docx,.xlsx,.pptx,.txt,.rtf,.csv,.odt,.ods,.odp"
+                                onChange={(event) => handleBidFormAttachmentChange(event.target.files)}
+                              />
+                            </Button>
+                            {bidFormAttachments.length > 0 ? (
+                              <Stack spacing={1} sx={{ width: '100%' }}>
+                                <Typography variant="subtitle2" color="text.secondary">
+                                  Selected files
+                                </Typography>
+                                {bidFormAttachments.map((file, index) => (
+                                  <Stack
+                                    key={`${file.name}-${index}`}
+                                    direction="row"
+                                    alignItems="center"
+                                    spacing={1}
+                                    flexWrap="wrap"
+                                  >
+                                    <Typography variant="body2" noWrap sx={{ minWidth: 0, flex: '1 1 120px' }}>
+                                      {file.name}
+                                    </Typography>
+                                    <Button
+                                      size="small"
+                                      variant="outlined"
+                                      onClick={() => handleBidFormParseFile(file)}
+                                      disabled={bidFormParsing}
+                                    >
+                                      {bidFormParsing ? 'Parsing...' : 'Extract bid data'}
+                                    </Button>
+                                    <Button
+                                      size="small"
+                                      variant="text"
+                                      color="secondary"
+                                      onClick={() => handleBidFormRemoveFile(index)}
+                                      disabled={bidFormParsing}
+                                    >
+                                      Remove
+                                    </Button>
+                                  </Stack>
+                                ))}
+                              </Stack>
+                            ) : null}
+                            {bidFormParsing ? (
+                              <Stack direction="row" spacing={1} alignItems="center">
+                                <CircularProgress size={16} sx={{ color: 'primary.main' }} />
+                              </Stack>
+                            ) : null}
+                            {bidFormParseResult ? (
+                              <Button
+                                size="small"
+                                variant="text"
+                                onClick={() => setBidFormPreviewOpen(true)}
+                              >
+                                Preview results
+                              </Button>
+                            ) : null}
+                          </Stack>
                           <TextField
                             label="Bid amount (USD)"
                             value={bidAmount}
@@ -712,12 +874,13 @@ function ContractorJobDetailsPage() {
                             fullWidth
                           />
                           <TextField
-                            label="Notes"
+                            label="Notes (e.g. scope of work)"
                             value={bidNotes}
                             onChange={(event) => setBidNotes(event.target.value)}
                             fullWidth
                             multiline
                             minRows={3}
+                            placeholder="Describe what?s included in the bid?materials, labor, scope, exclusions, etc."
                           />
                           <TextField
                             label="Terms"
@@ -735,147 +898,38 @@ function ContractorJobDetailsPage() {
                             multiline
                             minRows={2}
                           />
-                          <Stack spacing={1}>
-                            <Stack direction="row" spacing={2} alignItems="center" justifyContent="space-between">
-                              <Typography variant="subtitle2" color="text.secondary">
-                                Line items
-                              </Typography>
-                              <Button
-                                size="small"
-                                variant="text"
-                                onClick={() =>
-                                  setBidLineItems((current) => [
-                                    ...current,
-                                    {
-                                      id: crypto.randomUUID(),
-                                      description: '',
-                                      quantity: '',
-                                      unitPrice: '',
-                                    },
-                                  ])
-                                }
-                              >
-                                Add line item
-                              </Button>
-                            </Stack>
-                            {bidLineItems.length === 0 ? (
-                              <Typography color="text.secondary" variant="body2">
-                                No line items added.
-                              </Typography>
+                          <Stack direction="row" spacing={2}>
+                            {editingBidId ? (
+                              <>
+                                <Button variant="outlined" onClick={handleCancelEdit} disabled={bidSubmitting}>
+                                  Cancel
+                                </Button>
+                                <Button
+                                  variant="contained"
+                                  onClick={handleSubmitBid}
+                                  disabled={bidSubmitting}
+                                >
+                                  Save changes
+                                </Button>
+                              </>
                             ) : (
-                              <Stack spacing={2}>
-                                {bidLineItems.map((item) => (
-                                  <Stack key={item.id} spacing={1}>
-                                    <TextField
-                                      label="Description"
-                                      value={item.description}
-                                      onChange={(event) =>
-                                        setBidLineItems((current) =>
-                                          current.map((entry) =>
-                                            entry.id === item.id
-                                              ? { ...entry, description: event.target.value }
-                                              : entry,
-                                          ),
-                                        )
-                                      }
-                                      fullWidth
-                                    />
-                                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-                                      <TextField
-                                        label="Quantity"
-                                        value={item.quantity}
-                                        onChange={(event) =>
-                                          setBidLineItems((current) =>
-                                            current.map((entry) =>
-                                              entry.id === item.id
-                                                ? { ...entry, quantity: event.target.value }
-                                                : entry,
-                                            ),
-                                          )
-                                        }
-                                        inputProps={{ inputMode: 'numeric' }}
-                                        fullWidth
-                                      />
-                                      <TextField
-                                        label="Unit price (USD)"
-                                        value={item.unitPrice}
-                                        onChange={(event) =>
-                                          setBidLineItems((current) =>
-                                            current.map((entry) =>
-                                              entry.id === item.id
-                                                ? { ...entry, unitPrice: event.target.value }
-                                                : entry,
-                                            ),
-                                          )
-                                        }
-                                        inputProps={{ inputMode: 'decimal' }}
-                                        fullWidth
-                                      />
-                                    </Stack>
-                                    <Button
-                                      size="small"
-                                      color="error"
-                                      variant="text"
-                                      onClick={() =>
-                                        setBidLineItems((current) =>
-                                          current.filter((entry) => entry.id !== item.id),
-                                        )
-                                      }
-                                    >
-                                      Remove line item
-                                    </Button>
-                                  </Stack>
-                                ))}
-                              </Stack>
+                              <Button
+                                variant="contained"
+                                onClick={handleSubmitBid}
+                                disabled={bidSubmitting}
+                              >
+                                Submit bid
+                              </Button>
                             )}
                           </Stack>
-                          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems="center">
-                            <Button variant="outlined" component="label">
-                              Add attachments
-                              <input
-                                hidden
-                                type="file"
-                                multiple
-                                accept=".jpg,.jpeg,.png,.gif,.webp,.bmp,.pdf,.docx,.xlsx,.pptx,.txt,.rtf,.csv,.odt,.ods,.odp"
-                                onChange={(event) => handleBidFormAttachmentChange(event.target.files)}
-                              />
-                            </Button>
-                            {bidFormAttachments.length > 0 ? (
-                              <Typography color="text.secondary" variant="body2">
-                                {bidFormAttachments.length} attachment
-                                {bidFormAttachments.length > 1 ? 's' : ''} selected
-                              </Typography>
-                            ) : null}
-                            {bidFormParsing ? (
-                              <Stack direction="row" spacing={1} alignItems="center">
-                                <CircularProgress size={16} sx={{ color: 'primary.main' }} />
-                                <Typography color="text.secondary" variant="body2">
-                                  Parsing attachment...
-                                </Typography>
-                              </Stack>
-                            ) : null}
-                            {bidFormParseResult ? (
-                              <Button
-                                size="small"
-                                variant="text"
-                                onClick={() => setBidFormPreviewOpen(true)}
-                              >
-                                Preview results
-                              </Button>
-                            ) : null}
-                          </Stack>
-                          <Button
-                            variant="contained"
-                            onClick={handleSubmitBid}
-                            disabled={bidSubmitting}
-                          >
-                            Submit bid
-                          </Button>
                         </Stack>
                       </CardContent>
                     </Card>
                   ) : null}
-                  {!bidsLoading && bids.length > 0 ? (
+                  {!bidsLoading &&
+                  bids.length > 0 &&
+                  !editingBidId &&
+                  !(bids.length === 1 && bids[0].status === 'Withdrawn') ? (
                     <Stack spacing={2}>
                       {bids.map((bid) => {
                         const attachments = bidAttachments[bid.bidId] ?? []
@@ -889,54 +943,86 @@ function ContractorJobDetailsPage() {
                           <Card key={bid.bidId} variant="outlined">
                             <CardContent>
                               <Stack spacing={2}>
-                                <Stack spacing={1}>
-                                  <Typography fontWeight={600}>Your bid</Typography>
-                                  <Typography color="text.secondary">
-                                    Amount: {formatCurrency(bid.amountCents)}
-                                  </Typography>
-                                  <Typography color="text.secondary">Status: {bid.status}</Typography>
-                                  {bid.durationDays ? (
-                                    <Typography color="text.secondary">
-                                      Duration: {bid.durationDays} days
-                                    </Typography>
-                                  ) : null}
-                                  {bid.earliestStart ? (
-                                    <Typography color="text.secondary">
-                                      Earliest start: {new Date(bid.earliestStart).toLocaleDateString('en-US')}
-                                    </Typography>
-                                  ) : null}
-                                  {bid.notes ? (
-                                    <Typography color="text.secondary">Notes: {bid.notes}</Typography>
-                                  ) : null}
-                                </Stack>
+                                <Typography fontWeight={600}>Your bid</Typography>
                                 <Stack spacing={1}>
                                   <Typography variant="subtitle2" color="text.secondary">
                                     Bid attachments
                                   </Typography>
                                   <BidAttachmentViewer attachments={attachments} />
-                                  {parseJob ? (
-                                    <Stack direction="row" spacing={1} alignItems="center">
-                                      {isParsing ? (
-                                        <CircularProgress size={16} sx={{ color: 'primary.main' }} />
-                                      ) : null}
-                                      <Typography color="text.secondary" variant="body2">
-                                        Parse status: {parseJob.status}
-                                        {parseJob.errorMessage ? ` — ${parseJob.errorMessage}` : ''}
+                                  {attachments.length > 0 ? (
+                                    <Stack spacing={0.5} sx={{ mt: 1 }}>
+                                      <Typography variant="caption" color="text.secondary">
+                                        Extract bid data from one file:
                                       </Typography>
-                                      {hasParsedResult ? (
-                                        <Button
-                                          size="small"
-                                          variant="text"
-                                          onClick={() => {
-                                            if (parseJob?.result) {
-                                              setParsePreview({ bidId: bid.bidId, result: parseJob.result })
-                                            }
-                                          }}
-                                        >
-                                          Preview results
-                                        </Button>
-                                      ) : null}
+                                      {attachments.map((att) => {
+                                        const parsingThis =
+                                          startParseBidId === bid.bidId && startParseAttachmentId === att.id
+                                        return (
+                                          <Stack
+                                            key={att.id}
+                                            direction="row"
+                                            alignItems="center"
+                                            spacing={1}
+                                            flexWrap="wrap"
+                                          >
+                                            <Typography variant="body2" noWrap sx={{ minWidth: 0, flex: '1 1 120px' }}>
+                                              {att.fileName}
+                                            </Typography>
+                                            <Button
+                                              size="small"
+                                              variant="outlined"
+                                              onClick={() => handleStartBidParseAttachment(bid.bidId, att.id)}
+                                              disabled={
+                                                startParseBidId === bid.bidId ||
+                                                (parseJob && (parseJob.status === 'Pending' || parseJob.status === 'Processing'))
+                                              }
+                                            >
+                                              {parsingThis ? 'Parsing...' : 'Extract bid data'}
+                                            </Button>
+                                            {parsingThis ? (
+                                              <CircularProgress size={14} sx={{ color: 'primary.main' }} />
+                                            ) : null}
+                                          </Stack>
+                                        )
+                                      })}
                                     </Stack>
+                                  ) : null}
+                                  {attachments.length > 0 &&
+                                  !hasParsedResult &&
+                                  !(parseJob && (parseJob.status === 'Pending' || parseJob.status === 'Processing')) &&
+                                  startParseBidId !== bid.bidId ? (
+                                    <Button
+                                      size="small"
+                                      variant="text"
+                                      onClick={() => handleStartBidParse(bid.bidId)}
+                                    >
+                                      Extract from all attachments
+                                    </Button>
+                                  ) : null}
+                                  {(parseJob && (parseJob.status === 'Pending' || parseJob.status === 'Processing')) ||
+                                  (startParseBidId === bid.bidId && !startParseAttachmentId) ? (
+                                    <Stack direction="row" spacing={1} alignItems="center">
+                                      <CircularProgress size={16} sx={{ color: 'primary.main' }} />
+                                      <Typography color="text.secondary" variant="body2">
+                                        Parsing...
+                                      </Typography>
+                                    </Stack>
+                                  ) : null}
+                                  {parseJob && parseJob.errorMessage ? (
+                                    <Typography color="error" variant="body2">
+                                      {parseJob.errorMessage}
+                                    </Typography>
+                                  ) : null}
+                                  {hasParsedResult && parseJob?.result ? (
+                                    <Button
+                                      size="small"
+                                      variant="text"
+                                      onClick={() =>
+                                        setParsePreview({ bidId: bid.bidId, result: parseJob.result! })
+                                      }
+                                    >
+                                      Preview results
+                                    </Button>
                                   ) : null}
                                   {canUpload ? (
                                     <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems="center">
@@ -972,6 +1058,103 @@ function ContractorJobDetailsPage() {
                                     </Stack>
                                   ) : null}
                                 </Stack>
+                                <Stack spacing={1}>
+                                  <Typography color="text.secondary">
+                                    Amount: {formatCurrency(bid.amountCents)}
+                                  </Typography>
+                                  <Typography color="text.secondary">Status: {bid.status}</Typography>
+                                  {bid.durationDays ? (
+                                    <Typography color="text.secondary">
+                                      Duration: {bid.durationDays} days
+                                    </Typography>
+                                  ) : null}
+                                  {bid.earliestStart ? (
+                                    <Typography color="text.secondary">
+                                      Earliest start: {new Date(bid.earliestStart).toLocaleDateString('en-US')}
+                                    </Typography>
+                                  ) : null}
+                                  {bid.notes ? (
+                                    <Typography color="text.secondary">Notes: {bid.notes}</Typography>
+                                  ) : null}
+                                </Stack>
+                                {job?.status === 'Open' &&
+                                !['Accepted', 'Rejected', 'Withdrawn'].includes(bid.status) ? (
+                                  <Stack direction="row" spacing={2}>
+                                    <Button
+                                      size="small"
+                                      variant="outlined"
+                                      onClick={() => handleStartEditBid(bid.bidId)}
+                                    >
+                                      Edit bid
+                                    </Button>
+                                    <Button
+                                      size="small"
+                                      variant="outlined"
+                                      color="error"
+                                      onClick={() => setWithdrawConfirmBidId(bid.bidId)}
+                                    >
+                                      Withdraw bid
+                                    </Button>
+                                  </Stack>
+                                ) : null}
+                                <Stack spacing={1}>
+                                  {revisionsForBidId !== bid.bidId ? (
+                                    <Button
+                                      size="small"
+                                      variant="text"
+                                      onClick={() => setRevisionsForBidId(bid.bidId)}
+                                    >
+                                      Revision history
+                                    </Button>
+                                  ) : (
+                                    <>
+                                      <Stack direction="row" alignItems="center" spacing={1}>
+                                        <Typography variant="subtitle2" color="text.secondary">
+                                          Revision history
+                                        </Typography>
+                                        <Button
+                                          size="small"
+                                          variant="text"
+                                          onClick={() => setRevisionsForBidId(null)}
+                                        >
+                                          Hide
+                                        </Button>
+                                      </Stack>
+                                      {bidRevisionsLoading ? (
+                                        <Typography variant="body2" color="text.secondary">
+                                          Loading...
+                                        </Typography>
+                                      ) : bidRevisions.length === 0 ? (
+                                        <Typography variant="body2" color="text.secondary">
+                                          No revisions.
+                                        </Typography>
+                                      ) : (
+                                        <Stack spacing={1}>
+                                          {bidRevisions.map((rev) => (
+                                            <Card key={rev.id} variant="outlined" sx={{ bgcolor: 'action.hover' }}>
+                                              <CardContent>
+                                                <Stack spacing={0.5}>
+                                                  <Typography variant="subtitle2">
+                                                    Revision {rev.revisionNumber} ?{' '}
+                                                    {new Date(rev.createdAt).toLocaleString('en-US')}
+                                                  </Typography>
+                                                  <Typography variant="body2" color="text.secondary">
+                                                    Amount: {formatCurrency(rev.amountCents)}
+                                                  </Typography>
+                                                  {rev.notes ? (
+                                                    <Typography variant="body2" color="text.secondary">
+                                                      Notes: {rev.notes}
+                                                    </Typography>
+                                                  ) : null}
+                                                </Stack>
+                                              </CardContent>
+                                            </Card>
+                                          ))}
+                                        </Stack>
+                                      )}
+                                    </>
+                                  )}
+                                </Stack>
                               </Stack>
                             </CardContent>
                           </Card>
@@ -991,6 +1174,30 @@ function ContractorJobDetailsPage() {
           </Stack>
         </CardContent>
       </Card>
+      <Dialog
+        open={withdrawConfirmBidId !== null}
+        onClose={() => setWithdrawConfirmBidId(null)}
+        aria-labelledby="withdraw-dialog-title"
+        aria-describedby="withdraw-dialog-description"
+      >
+        <DialogTitle id="withdraw-dialog-title">Withdraw bid?</DialogTitle>
+        <DialogContent>
+          <DialogContentText id="withdraw-dialog-description">
+            The client will no longer see this bid. You can submit a new bid for this job if it is still open.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setWithdrawConfirmBidId(null)}>Cancel</Button>
+          <Button
+            color="error"
+            variant="contained"
+            onClick={() => withdrawConfirmBidId && handleWithdrawBid(withdrawConfirmBidId)}
+            autoFocus
+          >
+            Withdraw bid
+          </Button>
+        </DialogActions>
+      </Dialog>
       <BidAttachmentParsePreviewDialog
         open={Boolean(parsePreview)}
         result={parsePreview?.result ?? null}

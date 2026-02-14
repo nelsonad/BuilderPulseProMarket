@@ -1,5 +1,5 @@
 import {apiBaseUrl} from '../constants';
-import {ContractorProfile, RecommendedJob} from '../types';
+import {ContractorProfile, RecommendedJob, ServiceAreaItem, ServiceAreaRequestItem} from '../types';
 
 type PagedResponse<T> = {
   total: number;
@@ -15,6 +15,7 @@ type UpsertContractorProfileRequest = {
   lat: number;
   lng: number;
   serviceRadiusMeters: number;
+  serviceAreas?: ServiceAreaRequestItem[] | null;
   isAvailable?: boolean;
   unavailableReason?: string | null;
 };

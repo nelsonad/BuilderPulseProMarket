@@ -328,7 +328,11 @@ const App = () => {
         setContractorState(profile.state ?? '');
         setContractorZip(profile.zip ?? '');
         setContractorTrades(profile.trades);
-        setContractorRadius(profile.serviceRadiusMeters.toString());
+        setContractorRadius(
+          profile.serviceAreas?.length
+            ? profile.serviceAreas[0].radiusMeters.toString()
+            : profile.serviceRadiusMeters.toString(),
+        );
         setContractorIsAvailable(profile.isAvailable);
         setContractorUnavailableReason(profile.unavailableReason ?? '');
       } catch (error) {
@@ -390,7 +394,11 @@ const App = () => {
             .map(trade => tradeLookup.get(trade.trim().toLowerCase()))
             .filter((trade): trade is string => Boolean(trade));
           setContractorTrades(normalizedTrades);
-          setContractorRadius(profile.serviceRadiusMeters.toString());
+          setContractorRadius(
+            profile.serviceAreas?.length
+              ? profile.serviceAreas[0].radiusMeters.toString()
+              : profile.serviceRadiusMeters.toString(),
+          );
           setContractorIsAvailable(profile.isAvailable);
           setContractorUnavailableReason(profile.unavailableReason ?? '');
         }

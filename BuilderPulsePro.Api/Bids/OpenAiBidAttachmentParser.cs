@@ -219,11 +219,10 @@ public sealed class OpenAiBidAttachmentParser(
     {
         const string userPrompt = "Parse this bid document and return JSON with this schema: " +
             "{\"amountCents\":number|null,\"earliestStart\":string|null,\"durationDays\":number|null," +
-            "\"validUntil\":string|null,\"terms\":string|null,\"assumptions\":string|null," +
-            "\"lineItems\":[{\"description\":string,\"quantity\":number,\"unitPriceCents\":number}]," +
-            "\"variants\":[{\"name\":string,\"amountCents\":number,\"notes\":string|null," +
-            "\"lineItems\":[{\"description\":string,\"quantity\":number,\"unitPriceCents\":number}]}]}. " +
+            "\"validUntil\":string|null,\"terms\":string|null,\"assumptions\":string|null,\"notes\":string|null," +
+            "\"variants\":[{\"name\":string,\"amountCents\":number,\"notes\":string|null}]}. " +
             "Convert all currency amounts to cents (USD). Use ISO-8601 for dates. " +
+            "Put scope of work or itemized breakdown (if any) into the \"notes\" string. " +
             "If handwritten or scanned, infer best-effort values. Return JSON only.";
 
         return new OpenAiPrompt(BuildSystemPrompt(), userPrompt);
@@ -231,10 +230,10 @@ public sealed class OpenAiBidAttachmentParser(
 
     private static string BuildSystemPrompt()
     {
-        return "You extract pricing, dates, and line items from construction bids. " +
+        return "You extract pricing, dates, terms, assumptions, and scope of work from construction bids. " +
                "Always return strict JSON with the requested schema. " +
-               "Line item descriptions should be concise. " +
-               "If totals and line items disagree, keep the document's total and still list line items.";
+               "Summarize scope or line items as text in the notes field. " +
+               "If totals and itemized amounts disagree, keep the document's total.";
     }
 
     private static string? ExtractResponseText(string json)

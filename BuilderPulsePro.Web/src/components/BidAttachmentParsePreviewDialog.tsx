@@ -18,7 +18,7 @@ const formatDate = (value?: string | null) =>
         day: 'numeric',
         year: 'numeric',
       })
-    : '—'
+    : '?'
 
 function BidAttachmentParsePreviewDialog({
   open,
@@ -35,7 +35,7 @@ function BidAttachmentParsePreviewDialog({
         result.validUntil ||
         result.terms ||
         result.assumptions ||
-        result.lineItems.length > 0 ||
+        result.notes?.trim() ||
         result.variants.length > 0),
   )
 
@@ -85,21 +85,14 @@ function BidAttachmentParsePreviewDialog({
                 <Typography>{result.assumptions}</Typography>
               </Stack>
             ) : null}
-            {result.lineItems.length > 0 ? (
+            {result.notes?.trim() ? (
               <Stack spacing={1}>
                 <Typography variant="subtitle2" color="text.secondary">
-                  Line items
+                  Notes / scope of work
                 </Typography>
-                <Stack spacing={1}>
-                  {result.lineItems.map((item) => (
-                    <Stack key={item.id} spacing={0.25}>
-                      <Typography fontWeight={600}>{item.description}</Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        {item.quantity} × {formatCurrency(item.unitPriceCents)} = {formatCurrency(item.totalCents)}
-                      </Typography>
-                    </Stack>
-                  ))}
-                </Stack>
+                <Typography component="pre" sx={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit' }}>
+                  {result.notes}
+                </Typography>
               </Stack>
             ) : null}
             {result.variants.length > 0 ? (
@@ -121,20 +114,6 @@ function BidAttachmentParsePreviewDialog({
                           </Typography>
                         ) : null}
                       </Stack>
-                      {variant.lineItems.length > 0 ? (
-                        <Stack spacing={0.75}>
-                          {variant.lineItems.map((item) => (
-                            <Stack key={item.id} spacing={0.2}>
-                              <Typography variant="body2" fontWeight={600}>
-                                {item.description}
-                              </Typography>
-                              <Typography variant="caption" color="text.secondary">
-                                {item.quantity} × {formatCurrency(item.unitPriceCents)} = {formatCurrency(item.totalCents)}
-                              </Typography>
-                            </Stack>
-                          ))}
-                        </Stack>
-                      ) : null}
                       <Divider />
                     </Stack>
                   ))}

@@ -1,4 +1,4 @@
-﻿namespace BuilderPulsePro.Api.Contracts;
+namespace BuilderPulsePro.Api.Contracts;
 
 public record CreateBidRequest(
     long AmountCents,
@@ -8,7 +8,6 @@ public record CreateBidRequest(
     DateTimeOffset? ValidUntil,
     string? Terms,
     string? Assumptions,
-    IReadOnlyList<BidLineItemRequest>? LineItems,
     IReadOnlyList<BidVariantRequest>? Variants
 );
 
@@ -20,7 +19,6 @@ public record UpdateBidRequest(
     DateTimeOffset? ValidUntil,
     string? Terms,
     string? Assumptions,
-    IReadOnlyList<BidLineItemRequest>? LineItems,
     IReadOnlyList<BidVariantRequest>? Variants
 );
 
@@ -38,31 +36,13 @@ public record BidResponse(
     bool IsAccepted,
     string Status,
     DateTimeOffset CreatedAt,
-    IReadOnlyList<BidLineItemResponse> LineItems,
     IReadOnlyList<BidVariantResponse> Variants
-);
-
-public record BidLineItemRequest(
-    string Description,
-    int Quantity,
-    long UnitPriceCents
-);
-
-public record BidLineItemResponse(
-    Guid Id,
-    Guid BidId,
-    string Description,
-    int Quantity,
-    long UnitPriceCents,
-    long TotalCents,
-    int SortOrder
 );
 
 public record BidVariantRequest(
     string Name,
     long AmountCents,
-    string? Notes,
-    IReadOnlyList<BidVariantLineItemRequest>? LineItems
+    string? Notes
 );
 
 public record BidVariantResponse(
@@ -71,23 +51,6 @@ public record BidVariantResponse(
     string Name,
     long AmountCents,
     string? Notes,
-    int SortOrder,
-    IReadOnlyList<BidVariantLineItemResponse> LineItems
-);
-
-public record BidVariantLineItemRequest(
-    string Description,
-    int Quantity,
-    long UnitPriceCents
-);
-
-public record BidVariantLineItemResponse(
-    Guid Id,
-    Guid BidVariantId,
-    string Description,
-    int Quantity,
-    long UnitPriceCents,
-    long TotalCents,
     int SortOrder
 );
 
@@ -104,7 +67,6 @@ public record BidRevisionResponse(
     DateTimeOffset? ValidUntil,
     string? Terms,
     string? Assumptions,
-    IReadOnlyList<BidLineItemResponse> LineItems,
     IReadOnlyList<BidVariantResponse> Variants
 );
 
@@ -115,7 +77,7 @@ public record BidAttachmentParseResult(
     DateTimeOffset? ValidUntil,
     string? Terms,
     string? Assumptions,
-    IReadOnlyList<BidLineItemResponse> LineItems,
+    string? Notes,
     IReadOnlyList<BidVariantResponse> Variants
 );
 

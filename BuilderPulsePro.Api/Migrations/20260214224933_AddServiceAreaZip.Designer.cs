@@ -3,6 +3,7 @@ using System;
 using BuilderPulsePro.Api.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using NetTopologySuite.Geometries;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
@@ -12,9 +13,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace BuilderPulsePro.Api.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260214224933_AddServiceAreaZip")]
+    partial class AddServiceAreaZip
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -381,21 +384,6 @@ namespace BuilderPulsePro.Api.Migrations
                     NpgsqlIndexBuilderExtensions.HasMethod(b.HasIndex("HomeBase"), "gist");
 
                     b.ToTable("Contractors");
-                });
-
-            modelBuilder.Entity("BuilderPulsePro.Api.Domain.ContractorAuthorizedUser", b =>
-                {
-                    b.Property<Guid>("ContractorProfileId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("ContractorProfileId", "UserId");
-
-                    b.HasIndex("UserId");
-
-                    b.ToTable("ContractorAuthorizedUsers");
                 });
 
             modelBuilder.Entity("BuilderPulsePro.Api.Domain.ContractorJobNotification", b =>
@@ -955,15 +943,6 @@ namespace BuilderPulsePro.Api.Migrations
                         .IsRequired();
 
                     b.Navigation("Bid");
-                });
-
-            modelBuilder.Entity("BuilderPulsePro.Api.Domain.ContractorAuthorizedUser", b =>
-                {
-                    b.HasOne("BuilderPulsePro.Api.Domain.ContractorProfile", null)
-                        .WithMany()
-                        .HasForeignKey("ContractorProfileId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
                 });
 
             modelBuilder.Entity("BuilderPulsePro.Api.Domain.ContractorServiceArea", b =>

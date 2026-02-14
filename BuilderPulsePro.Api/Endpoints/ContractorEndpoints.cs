@@ -1,4 +1,4 @@
-﻿using BuilderPulsePro.Api.Auth;
+using BuilderPulsePro.Api.Auth;
 using BuilderPulsePro.Api.Contracts;
 using BuilderPulsePro.Api.Data;
 using BuilderPulsePro.Api.Domain;
@@ -171,38 +171,58 @@ public static class ContractorEndpoints
     {
         var userId = CurrentUser.GetUserId(user);
 
+        var profileId = await ContractorAuthz.GetContractorProfileIdForBiddingAsync(db, userId);
+        if (profileId is null) return Results.NotFound();
+
         var p = await db.ContractorProfiles.AsNoTracking()
-            .FirstOrDefaultAsync(x => x.UserId == userId);
+            .FirstOrDefaultAsync(x => x.UserId == profileId.Value);
 
         if (p is null) return Results.NotFound();
 
-        return Results.Ok(new ContractorProfileResponse(
+        var serviceAreas = await db.ContractorServiceAreas.AsNoTracking()
+            .Where(sa => sa.ContractorProfileId == profileId.Value)
+            .OrderBy(sa => sa.SortOrder)
+            .Select(sa => new ServiceAreaItem(sa.Center.Y, sa.Center.X, sa.RadiusMeters, sa.Label, sa.Zip))
+            .ToListAsync();
+
+        return Results.Ok(BuildProfileResponse(p, serviceAreas));
+    }
+
+    private static ContractorProfileResponse BuildProfileResponse(ContractorProfile p, List<ServiceAreaItem> serviceAreas)
+    {
+        return new ContractorProfileResponse(
             p.DisplayName,
             SplitTrades(p.TradesCsv),
             p.City,
             p.State,
             p.Zip,
-            p.HomeBase.Y, // lat (in-memory)
-            p.HomeBase.X, // lng (in-memory)
+            p.HomeBase.Y,
+            p.HomeBase.X,
             p.ServiceRadiusMeters,
+            serviceAreas.Count > 0 ? serviceAreas.ToArray() : new[] { new ServiceAreaItem(p.HomeBase.Y, p.HomeBase.X, p.ServiceRadiusMeters, "Primary", p.Zip) },
             p.IsAvailable,
             p.UnavailableReason,
             p.UpdatedAt
-        ));
+        );
     }
 
     private static async Task<IResult> UpsertProfile(AppDbContext db, ClaimsPrincipal user, UpsertContractorProfileRequest req, GeoNamesZipLookup lookup)
     {
         var userId = CurrentUser.GetUserId(user);
 
+        // Only the profile owner can create or update the profile (Phase 1: no admin role).
+        var ownedProfileId = await db.ContractorProfiles.AsNoTracking()
+            .Where(p => p.UserId == userId)
+            .Select(p => p.UserId)
+            .FirstOrDefaultAsync();
+        if (ownedProfileId == default && await db.ContractorAuthorizedUsers.AsNoTracking().AnyAsync(a => a.UserId == userId))
+            return Results.BadRequest("Only the profile owner can edit the profile. You are an authorized user.");
+
         if (string.IsNullOrWhiteSpace(req.DisplayName))
             return Results.BadRequest("DisplayName is required.");
 
         if (string.IsNullOrWhiteSpace(req.Zip))
             return Results.BadRequest("Zip is required.");
-
-        if (req.ServiceRadiusMeters <= 0)
-            return Results.BadRequest("ServiceRadiusMeters must be > 0.");
 
         var tradesCsv = NormalizeTrades(req.Trades);
         if (string.IsNullOrWhiteSpace(tradesCsv))
@@ -214,17 +234,36 @@ public static class ContractorEndpoints
         var lat = req.Lat;
         var lng = req.Lng;
 
-
-
         if (!string.IsNullOrWhiteSpace(zip))
         {
             var lookupResult = lookup.Lookup(zip);
-
             if (lookupResult == null)
                 return Results.BadRequest("Zip code not found.");
-
             lat = lookupResult.Lat;
             lng = lookupResult.Lng;
+        }
+
+        List<ServiceAreaItem> areasToSave;
+        if (req.ServiceAreas is { Length: > 0 })
+        {
+            areasToSave = new List<ServiceAreaItem>();
+            foreach (var a in req.ServiceAreas)
+            {
+                if (string.IsNullOrWhiteSpace(a.Zip))
+                    return Results.BadRequest("Each service area must have a Zip code.");
+                if (a.RadiusMeters <= 0)
+                    return Results.BadRequest("Each service area must have RadiusMeters > 0.");
+                var areaLookup = lookup.Lookup(a.Zip.Trim());
+                if (areaLookup == null)
+                    return Results.BadRequest($"Zip code not found: {a.Zip.Trim()}.");
+                areasToSave.Add(new ServiceAreaItem(areaLookup.Lat, areaLookup.Lng, a.RadiusMeters, string.IsNullOrWhiteSpace(a.Label) ? null : a.Label.Trim(), a.Zip.Trim()));
+            }
+        }
+        else
+        {
+            if (req.ServiceRadiusMeters <= 0)
+                return Results.BadRequest("ServiceRadiusMeters must be > 0.");
+            areasToSave = new List<ServiceAreaItem> { new ServiceAreaItem(lat, lng, req.ServiceRadiusMeters, "Primary", zip) };
         }
 
         var existing = await db.ContractorProfiles.FirstOrDefaultAsync(x => x.UserId == userId);
@@ -233,9 +272,11 @@ public static class ContractorEndpoints
         var normalizedReason = string.IsNullOrWhiteSpace(req.UnavailableReason)
             ? null
             : req.UnavailableReason.Trim();
-
         var resolvedAvailability = requestedAvailability ?? existing?.IsAvailable ?? true;
         var resolvedReason = resolvedAvailability ? null : normalizedReason;
+
+        var primary = areasToSave[0];
+        var homeBase = new Point(primary.Lng, primary.Lat) { SRID = 4326 };
 
         if (existing is null)
         {
@@ -247,13 +288,12 @@ public static class ContractorEndpoints
                 State = state,
                 Zip = zip,
                 TradesCsv = tradesCsv,
-                HomeBase = new Point(lng, lat) { SRID = 4326 },
-                ServiceRadiusMeters = req.ServiceRadiusMeters,
+                HomeBase = homeBase,
+                ServiceRadiusMeters = primary.RadiusMeters,
                 IsAvailable = resolvedAvailability,
                 UnavailableReason = resolvedReason,
                 UpdatedAt = DateTimeOffset.UtcNow
             };
-
             db.ContractorProfiles.Add(existing);
         }
         else
@@ -263,28 +303,36 @@ public static class ContractorEndpoints
             existing.State = state;
             existing.Zip = zip;
             existing.TradesCsv = tradesCsv;
-            existing.HomeBase = new Point(lng, lat) { SRID = 4326 };
-            existing.ServiceRadiusMeters = req.ServiceRadiusMeters;
+            existing.HomeBase = homeBase;
+            existing.ServiceRadiusMeters = primary.RadiusMeters;
             existing.IsAvailable = resolvedAvailability;
             existing.UnavailableReason = resolvedReason;
             existing.UpdatedAt = DateTimeOffset.UtcNow;
         }
 
+        var existingAreas = await db.ContractorServiceAreas
+            .Where(sa => sa.ContractorProfileId == userId)
+            .ToListAsync();
+        db.ContractorServiceAreas.RemoveRange(existingAreas);
+
+        for (var i = 0; i < areasToSave.Count; i++)
+        {
+            var a = areasToSave[i];
+            db.ContractorServiceAreas.Add(new ContractorServiceArea
+            {
+                Id = Guid.NewGuid(),
+                ContractorProfileId = userId,
+                Center = new Point(a.Lng, a.Lat) { SRID = 4326 },
+                RadiusMeters = a.RadiusMeters,
+                Label = string.IsNullOrWhiteSpace(a.Label) ? null : a.Label.Trim(),
+                Zip = a.Zip,
+                SortOrder = i
+            });
+        }
+
         await db.SaveChangesAsync();
 
-        return Results.Ok(new ContractorProfileResponse(
-            existing.DisplayName,
-            SplitTrades(existing.TradesCsv),
-            existing.City,
-            existing.State,
-            existing.Zip,
-            existing.HomeBase.Y,
-            existing.HomeBase.X,
-            existing.ServiceRadiusMeters,
-            existing.IsAvailable,
-            existing.UnavailableReason,
-            existing.UpdatedAt
-        ));
+        return Results.Ok(BuildProfileResponse(existing, areasToSave));
     }
 
     private static async Task<IResult> UpdateAvailability(
@@ -313,19 +361,13 @@ public static class ContractorEndpoints
 
         await db.SaveChangesAsync();
 
-        return Results.Ok(new ContractorProfileResponse(
-            profile.DisplayName,
-            SplitTrades(profile.TradesCsv),
-            profile.City,
-            profile.State,
-            profile.Zip,
-            profile.HomeBase.Y,
-            profile.HomeBase.X,
-            profile.ServiceRadiusMeters,
-            profile.IsAvailable,
-            profile.UnavailableReason,
-            profile.UpdatedAt
-        ));
+        var serviceAreas = await db.ContractorServiceAreas.AsNoTracking()
+            .Where(sa => sa.ContractorProfileId == userId)
+            .OrderBy(sa => sa.SortOrder)
+            .Select(sa => new ServiceAreaItem(sa.Center.Y, sa.Center.X, sa.RadiusMeters, sa.Label, sa.Zip))
+            .ToListAsync();
+
+        return Results.Ok(BuildProfileResponse(profile, serviceAreas));
     }
 
     private static async Task<IResult> GetRecommendedJobs(
@@ -341,8 +383,12 @@ public static class ContractorEndpoints
         take = Math.Clamp(take, 1, 200);
         skip = Math.Max(skip, 0);
 
+        var profileId = await ContractorAuthz.GetContractorProfileIdForBiddingAsync(db, userId);
+        if (profileId is null)
+            return Results.BadRequest("Create your contractor profile to get recommended jobs.");
+
         var profile = await db.ContractorProfiles.AsNoTracking()
-            .Where(p => p.UserId == userId)
+            .Where(p => p.UserId == profileId.Value)
             .Select(p => new
             {
                 p.HomeBase,
@@ -358,11 +404,7 @@ public static class ContractorEndpoints
         if (!profile.IsAvailable)
             return Results.Ok(new PagedResponse<RecommendedJobResponse>(0, new List<RecommendedJobResponse>()));
 
-        var homeBase = profile.HomeBase;
-
-        var effectiveMaxDistance = profile.ServiceRadiusMeters;
-        if (maxDistanceMeters is > 0)
-            effectiveMaxDistance = Math.Min(effectiveMaxDistance, maxDistanceMeters.Value);
+        var hasServiceAreas = await db.ContractorServiceAreas.AnyAsync(sa => sa.ContractorProfileId == profileId.Value);
 
         var tradeFilter = (trade ?? "").Trim();
         var hasTradeFilter = !string.IsNullOrWhiteSpace(tradeFilter);
@@ -382,51 +424,74 @@ public static class ContractorEndpoints
             jobs = jobs.Where(j => profileTrades.Any(t => EF.Functions.ILike(j.Trade, t)));
         }
 
-        // Build the common projected query (IQueryable) ONCE
-        var projected = jobs
-            .Select(j => new
-            {
-                j.Id,
-                j.Title,
-                j.Trade,
-                j.Status,
-                j.CreatedAt,
-                j.City,
-                j.State,
-                j.Zip,
-                j.AcceptedBidId,
-                j.CompletedAt,
-                j.SiteLocation,
-                DistanceMeters = j.SiteLocation.Distance(homeBase),
-                HasBidByMe = db.Bids.Any(b => b.JobId == j.Id && b.BidderUserId == userId)
-            })
-            .Where(x => x.DistanceMeters <= effectiveMaxDistance);
+        IQueryable<RecommendedJobProjection> projected;
+        if (hasServiceAreas)
+        {
+            var pid = profileId.Value;
+            projected = jobs
+                .Where(j => db.ContractorServiceAreas.Any(sa =>
+                    sa.ContractorProfileId == pid && j.SiteLocation.Distance(sa.Center) <= sa.RadiusMeters))
+                .Select(j => new RecommendedJobProjection
+                {
+                    Id = j.Id,
+                    Title = j.Title,
+                    Trade = j.Trade,
+                    Status = j.Status,
+                    CreatedAt = j.CreatedAt,
+                    City = j.City,
+                    State = j.State,
+                    Zip = j.Zip,
+                    AcceptedBidId = j.AcceptedBidId,
+                    CompletedAt = j.CompletedAt,
+                    SiteLocation = j.SiteLocation,
+                    DistanceMeters = db.ContractorServiceAreas
+                        .Where(sa => sa.ContractorProfileId == pid)
+                        .Min(sa => j.SiteLocation.Distance(sa.Center)),
+                    HasBidByMe = db.Bids.Any(b => b.JobId == j.Id && b.BidderUserId == userId)
+                });
+        }
+        else
+        {
+            var homeBase = profile.HomeBase;
+            var effectiveMaxDistance = profile.ServiceRadiusMeters;
+            if (maxDistanceMeters is > 0)
+                effectiveMaxDistance = Math.Min(effectiveMaxDistance, maxDistanceMeters.Value);
 
-        // Total count (no ordering/paging)
+            projected = jobs
+                .Select(j => new RecommendedJobProjection
+                {
+                    Id = j.Id,
+                    Title = j.Title,
+                    Trade = j.Trade,
+                    Status = j.Status,
+                    CreatedAt = j.CreatedAt,
+                    City = j.City,
+                    State = j.State,
+                    Zip = j.Zip,
+                    AcceptedBidId = j.AcceptedBidId,
+                    CompletedAt = j.CompletedAt,
+                    SiteLocation = j.SiteLocation,
+                    DistanceMeters = j.SiteLocation.Distance(homeBase),
+                    HasBidByMe = db.Bids.Any(b => b.JobId == j.Id && b.BidderUserId == userId)
+                })
+                .Where(x => x.DistanceMeters <= effectiveMaxDistance);
+        }
+
+        if (maxDistanceMeters is > 0 && hasServiceAreas)
+            projected = projected.Where(x => x.DistanceMeters <= maxDistanceMeters!.Value);
+
         var total = await projected.CountAsync();
 
-        // Page items
         var sortKey = (sort ?? "").Trim().ToLowerInvariant();
-
         var ordered = sortKey switch
         {
-            "newest" => projected
-                .OrderByDescending(x => x.CreatedAt)
-                .ThenBy(x => x.DistanceMeters),
-            "oldest" => projected
-                .OrderBy(x => x.CreatedAt)
-                .ThenBy(x => x.DistanceMeters),
-            _ => projected
-                .OrderBy(x => x.DistanceMeters)
-                .ThenByDescending(x => x.CreatedAt)
+            "newest" => projected.OrderByDescending(x => x.CreatedAt).ThenBy(x => x.DistanceMeters),
+            "oldest" => projected.OrderBy(x => x.CreatedAt).ThenBy(x => x.DistanceMeters),
+            _ => projected.OrderBy(x => x.DistanceMeters).ThenByDescending(x => x.CreatedAt)
         };
 
-        var rows = await ordered
-            .Skip(skip)
-            .Take(take)
-            .ToListAsync();
+        var rows = await ordered.Skip(skip).Take(take).ToListAsync();
 
-        // Convert to response (lat/lng read in-memory)
         var items = rows.Select(x => new RecommendedJobResponse(
             x.Id,
             x.Title,
@@ -445,6 +510,23 @@ public static class ContractorEndpoints
         )).ToList();
 
         return Results.Ok(new PagedResponse<RecommendedJobResponse>(total, items));
+    }
+
+    private sealed class RecommendedJobProjection
+    {
+        public Guid Id { get; set; }
+        public string Title { get; set; } = "";
+        public string Trade { get; set; } = "";
+        public JobStatus Status { get; set; }
+        public DateTimeOffset CreatedAt { get; set; }
+        public string? City { get; set; }
+        public string? State { get; set; }
+        public string? Zip { get; set; }
+        public Guid? AcceptedBidId { get; set; }
+        public DateTimeOffset? CompletedAt { get; set; }
+        public Point SiteLocation { get; set; } = default!;
+        public double DistanceMeters { get; set; }
+        public bool HasBidByMe { get; set; }
     }
 
     private static string NormalizeTrades(string[] trades)

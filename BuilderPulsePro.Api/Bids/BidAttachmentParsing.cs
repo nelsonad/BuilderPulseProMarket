@@ -44,7 +44,7 @@ public static class BidAttachmentParsingSerializer
                null,
                null,
                null,
-               Array.Empty<BidLineItemResponse>(),
+               null,
                Array.Empty<BidVariantResponse>());
 }
 

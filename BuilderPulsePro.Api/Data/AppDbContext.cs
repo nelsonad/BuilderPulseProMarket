@@ -1,4 +1,4 @@
-﻿using BuilderPulsePro.Api.Domain;
+using BuilderPulsePro.Api.Domain;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
@@ -14,10 +14,10 @@ public class AppDbContext : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>
     public DbSet<JobAttachment> JobAttachments => Set<JobAttachment>();
     public DbSet<Contractor> Contractors => Set<Contractor>();
     public DbSet<ContractorProfile> ContractorProfiles => Set<ContractorProfile>();
+    public DbSet<ContractorAuthorizedUser> ContractorAuthorizedUsers => Set<ContractorAuthorizedUser>();
+    public DbSet<ContractorServiceArea> ContractorServiceAreas => Set<ContractorServiceArea>();
     public DbSet<Bid> Bids => Set<Bid>();
-    public DbSet<BidLineItem> BidLineItems => Set<BidLineItem>();
     public DbSet<BidVariant> BidVariants => Set<BidVariant>();
-    public DbSet<BidVariantLineItem> BidVariantLineItems => Set<BidVariantLineItem>();
     public DbSet<BidRevision> BidRevisions => Set<BidRevision>();
     public DbSet<BidAttachmentParseJob> BidAttachmentParseJobs => Set<BidAttachmentParseJob>();
     public DbSet<BidAttachment> BidAttachments => Set<BidAttachment>();
@@ -140,23 +140,6 @@ public class AppDbContext : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
-        modelBuilder.Entity<BidLineItem>(b =>
-        {
-            b.HasKey(x => x.Id);
-            b.Property(x => x.Description).HasMaxLength(500).IsRequired();
-            b.Property(x => x.Quantity).IsRequired();
-            b.Property(x => x.UnitPriceCents).IsRequired();
-            b.Property(x => x.SortOrder).IsRequired();
-
-            b.HasIndex(x => x.BidId);
-            b.HasIndex(x => new { x.BidId, x.SortOrder });
-
-            b.HasOne(x => x.Bid)
-                .WithMany(b => b.LineItems)
-                .HasForeignKey(x => x.BidId)
-                .OnDelete(DeleteBehavior.Cascade);
-        });
-
         modelBuilder.Entity<BidVariant>(b =>
         {
             b.HasKey(x => x.Id);
@@ -185,23 +168,6 @@ public class AppDbContext : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>
             b.HasIndex(x => x.BidId);
             b.HasIndex(x => x.AttachmentId);
             b.HasIndex(x => new { x.BidId, x.AttachmentId });
-        });
-
-        modelBuilder.Entity<BidVariantLineItem>(b =>
-        {
-            b.HasKey(x => x.Id);
-            b.Property(x => x.Description).HasMaxLength(500).IsRequired();
-            b.Property(x => x.Quantity).IsRequired();
-            b.Property(x => x.UnitPriceCents).IsRequired();
-            b.Property(x => x.SortOrder).IsRequired();
-
-            b.HasIndex(x => x.BidVariantId);
-            b.HasIndex(x => new { x.BidVariantId, x.SortOrder });
-
-            b.HasOne(x => x.BidVariant)
-                .WithMany(v => v.LineItems)
-                .HasForeignKey(x => x.BidVariantId)
-                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<BidRevision>(b =>
@@ -239,6 +205,38 @@ public class AppDbContext : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>
             b.Property(x => x.UnavailableReason).HasMaxLength(500);
             b.Property(x => x.LastDigestSentAt);
             b.Property(x => x.UpdatedAt).IsRequired();
+        });
+
+        modelBuilder.Entity<ContractorAuthorizedUser>(b =>
+        {
+            b.HasKey(x => new { x.ContractorProfileId, x.UserId });
+
+            b.HasIndex(x => x.UserId);
+
+            b.HasOne<ContractorProfile>()
+                .WithMany()
+                .HasForeignKey(x => x.ContractorProfileId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ContractorServiceArea>(b =>
+        {
+            b.HasKey(x => x.Id);
+
+            b.Property(x => x.ContractorProfileId).IsRequired();
+            b.Property(x => x.Center).HasColumnType("geography (point)");
+            b.HasIndex(x => x.Center).HasMethod("gist");
+            b.Property(x => x.RadiusMeters).IsRequired();
+            b.Property(x => x.Label).HasMaxLength(200);
+            b.Property(x => x.Zip).HasMaxLength(20);
+            b.Property(x => x.SortOrder).IsRequired();
+
+            b.HasIndex(x => x.ContractorProfileId);
+
+            b.HasOne<ContractorProfile>()
+                .WithMany()
+                .HasForeignKey(x => x.ContractorProfileId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<ActivityEvent>(b =>

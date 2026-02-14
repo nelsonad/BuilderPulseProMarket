@@ -43,6 +43,20 @@ export type PendingAttachment = {
   size?: number | null;
 };
 
+export type ServiceAreaItem = {
+  lat: number;
+  lng: number;
+  radiusMeters: number;
+  label?: string | null;
+  zip?: string | null;
+};
+
+export type ServiceAreaRequestItem = {
+  zip: string;
+  radiusMeters: number;
+  label?: string | null;
+};
+
 export type ContractorProfile = {
   displayName: string;
   trades: string[];
@@ -52,6 +66,7 @@ export type ContractorProfile = {
   lat: number;
   lng: number;
   serviceRadiusMeters: number;
+  serviceAreas: ServiceAreaItem[];
   isAvailable: boolean;
   unavailableReason?: string | null;
   updatedAt: string;

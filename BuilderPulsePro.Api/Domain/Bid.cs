@@ -1,4 +1,4 @@
-﻿namespace BuilderPulsePro.Api.Domain;
+namespace BuilderPulsePro.Api.Domain;
 
 public class Bid
 {
@@ -23,6 +23,4 @@ public class Bid
     public bool IsAccepted { get; set; }
     public BidStatus Status { get; set; } = BidStatus.Submitted;
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
-
-    public ICollection<BidLineItem> LineItems { get; set; } = new List<BidLineItem>();
 }
