@@ -39,3 +39,9 @@ public record UpdateContractorAvailabilityRequest(
     bool IsAvailable,
     string? UnavailableReason
 );
+
+/// <summary>An authorized user who can act on behalf of the contractor profile.</summary>
+public record AuthorizedUserItem(Guid UserId, string Email);
+
+/// <summary>Request to add an authorized user by email (user must already have an account).</summary>
+public record AddAuthorizedUserRequest(string Email);

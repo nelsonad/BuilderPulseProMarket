@@ -156,3 +156,47 @@ export const updateContractorAvailability = async (token: string, payload: Updat
 
   return (await response.json()) as ContractorProfile
 }
+
+export type AuthorizedUserItem = {
+  userId: string
+  email: string
+}
+
+/** List authorized users (profile owner only). Returns null if not owner (403). */
+export const getAuthorizedUsers = async (token: string): Promise<AuthorizedUserItem[] | null> => {
+  const response = await fetch(buildUrl('/contractor/profile/authorized-users'), {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+
+  if (response.status === 403) return null
+  if (!response.ok) throw new Error(await buildError(response))
+
+  return (await response.json()) as AuthorizedUserItem[]
+}
+
+/** Add an authorized user by email (profile owner only). */
+export const addAuthorizedUser = async (token: string, email: string): Promise<AuthorizedUserItem[]> => {
+  const response = await fetch(buildUrl('/contractor/profile/authorized-users'), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ email: email.trim() }),
+  })
+
+  if (!response.ok) throw new Error(await buildError(response))
+
+  return (await response.json()) as AuthorizedUserItem[]
+}
+
+/** Remove an authorized user (profile owner only). */
+export const removeAuthorizedUser = async (token: string, authorizedUserId: string): Promise<void> => {
+  const response = await fetch(buildUrl(`/contractor/profile/authorized-users/${authorizedUserId}`), {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  })
+
+  if (response.status === 404) throw new Error('Authorized user not found.')
+  if (!response.ok) throw new Error(await buildError(response))
+}

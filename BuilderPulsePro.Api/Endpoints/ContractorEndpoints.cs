@@ -4,6 +4,7 @@ using BuilderPulsePro.Api.Data;
 using BuilderPulsePro.Api.Domain;
 using BuilderPulsePro.Api.Events;
 using BuilderPulsePro.Api.Geo;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using NetTopologySuite.Geometries;
 using System.Security.Claims;
@@ -24,6 +25,10 @@ public static class ContractorEndpoints
         group.MapGet("/profile", GetProfile);
         group.MapPut("/profile", UpsertProfile);
         group.MapPut("/profile/availability", UpdateAvailability);
+
+        group.MapGet("/profile/authorized-users", ListAuthorizedUsers);
+        group.MapPost("/profile/authorized-users", AddAuthorizedUser);
+        group.MapDelete("/profile/authorized-users/{authorizedUserId:guid}", RemoveAuthorizedUser);
 
         group.MapGet("/jobs/recommended", GetRecommendedJobs);
 
@@ -179,11 +184,13 @@ public static class ContractorEndpoints
 
         if (p is null) return Results.NotFound();
 
-        var serviceAreas = await db.ContractorServiceAreas.AsNoTracking()
+        // Load without projecting geography Y/X in SQL (ST_Y(geography) not supported in PostGIS)
+        var serviceAreaRows = await db.ContractorServiceAreas.AsNoTracking()
             .Where(sa => sa.ContractorProfileId == profileId.Value)
             .OrderBy(sa => sa.SortOrder)
-            .Select(sa => new ServiceAreaItem(sa.Center.Y, sa.Center.X, sa.RadiusMeters, sa.Label, sa.Zip))
+            .Select(sa => new { sa.Center, sa.RadiusMeters, sa.Label, sa.Zip })
             .ToListAsync();
+        var serviceAreas = serviceAreaRows.Select(sa => new ServiceAreaItem(sa.Center.Y, sa.Center.X, sa.RadiusMeters, sa.Label, sa.Zip)).ToList();
 
         return Results.Ok(BuildProfileResponse(p, serviceAreas));
     }
@@ -361,13 +368,110 @@ public static class ContractorEndpoints
 
         await db.SaveChangesAsync();
 
-        var serviceAreas = await db.ContractorServiceAreas.AsNoTracking()
+        // Load without projecting geography Y/X in SQL (ST_Y(geography) not supported in PostGIS)
+        var serviceAreaRows = await db.ContractorServiceAreas.AsNoTracking()
             .Where(sa => sa.ContractorProfileId == userId)
             .OrderBy(sa => sa.SortOrder)
-            .Select(sa => new ServiceAreaItem(sa.Center.Y, sa.Center.X, sa.RadiusMeters, sa.Label, sa.Zip))
+            .Select(sa => new { sa.Center, sa.RadiusMeters, sa.Label, sa.Zip })
             .ToListAsync();
+        var serviceAreas = serviceAreaRows.Select(sa => new ServiceAreaItem(sa.Center.Y, sa.Center.X, sa.RadiusMeters, sa.Label, sa.Zip)).ToList();
 
         return Results.Ok(BuildProfileResponse(profile, serviceAreas));
+    }
+
+    private static async Task<IResult> ListAuthorizedUsers(AppDbContext db, ClaimsPrincipal user)
+    {
+        var userId = CurrentUser.GetUserId(user);
+
+        var ownedProfile = await db.ContractorProfiles.AsNoTracking()
+            .Where(p => p.UserId == userId)
+            .Select(p => p.UserId)
+            .FirstOrDefaultAsync();
+        if (ownedProfile == default)
+            return Results.Forbid();
+
+        var authorized = await db.ContractorAuthorizedUsers.AsNoTracking()
+            .Where(a => a.ContractorProfileId == userId)
+            .Join(db.Users.AsNoTracking(),
+                a => a.UserId,
+                u => u.Id,
+                (a, u) => new AuthorizedUserItem(u.Id, u.Email ?? ""))
+            .ToListAsync();
+
+        return Results.Ok(authorized);
+    }
+
+    private static async Task<IResult> AddAuthorizedUser(
+        AppDbContext db,
+        UserManager<AppUser> userManager,
+        ClaimsPrincipal user,
+        AddAuthorizedUserRequest req)
+    {
+        var userId = CurrentUser.GetUserId(user);
+
+        var ownedProfile = await db.ContractorProfiles.AsNoTracking()
+            .Where(p => p.UserId == userId)
+            .Select(p => p.UserId)
+            .FirstOrDefaultAsync();
+        if (ownedProfile == default)
+            return Results.Forbid();
+
+        var email = (req.Email ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(email))
+            return Results.BadRequest("Email is required.");
+
+        var targetUser = await userManager.FindByEmailAsync(email);
+        if (targetUser is null)
+            return Results.BadRequest("No account found with that email. The person must sign up first.");
+
+        if (targetUser.Id == userId)
+            return Results.BadRequest("You cannot add yourself as an authorized user.");
+
+        var exists = await db.ContractorAuthorizedUsers
+            .AnyAsync(a => a.ContractorProfileId == userId && a.UserId == targetUser.Id);
+        if (exists)
+            return Results.BadRequest("That user is already authorized.");
+
+        db.ContractorAuthorizedUsers.Add(new ContractorAuthorizedUser
+        {
+            ContractorProfileId = userId,
+            UserId = targetUser.Id,
+        });
+        await db.SaveChangesAsync();
+
+        var list = await db.ContractorAuthorizedUsers.AsNoTracking()
+            .Where(a => a.ContractorProfileId == userId)
+            .Join(db.Users.AsNoTracking(),
+                a => a.UserId,
+                u => u.Id,
+                (a, u) => new AuthorizedUserItem(u.Id, u.Email ?? ""))
+            .ToListAsync();
+
+        return Results.Ok(list);
+    }
+
+    private static async Task<IResult> RemoveAuthorizedUser(
+        AppDbContext db,
+        ClaimsPrincipal user,
+        Guid authorizedUserId)
+    {
+        var userId = CurrentUser.GetUserId(user);
+
+        var ownedProfile = await db.ContractorProfiles.AsNoTracking()
+            .Where(p => p.UserId == userId)
+            .Select(p => p.UserId)
+            .FirstOrDefaultAsync();
+        if (ownedProfile == default)
+            return Results.Forbid();
+
+        var deleted = await db.ContractorAuthorizedUsers
+            .Where(a => a.ContractorProfileId == userId && a.UserId == authorizedUserId)
+            .ExecuteDeleteAsync();
+
+        if (deleted == 0)
+            return Results.NotFound("Authorized user not found.");
+
+        return Results.NoContent();
     }
 
     private static async Task<IResult> GetRecommendedJobs(
